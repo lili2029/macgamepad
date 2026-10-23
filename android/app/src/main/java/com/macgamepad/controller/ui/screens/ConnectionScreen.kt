@@ -47,7 +47,9 @@ fun ConnectionScreen(
             .fillMaxSize()
             .background(
                 Brush.verticalGradient(listOf(Bg0, Bg1, Bg1))
-            ),
+            )
+            .statusBarsPadding()
+            .navigationBarsPadding(),
         contentAlignment = Alignment.Center
     ) {
         // Ambient radial glow

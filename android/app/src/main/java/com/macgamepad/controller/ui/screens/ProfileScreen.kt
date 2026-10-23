@@ -45,6 +45,7 @@ fun ProfileScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Bg1)
+            .navigationBarsPadding()
             .verticalScroll(scrollState)
     ) {
         // ── Header ──────────────────────────────────────────────────────────
@@ -53,6 +54,7 @@ fun ProfileScreen(
                 .fillMaxWidth()
                 .background(Bg2)
                 .border(width = 0.dp, color = Color.Transparent)
+                .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -138,7 +140,7 @@ fun ProfileScreen(
                 "手柄外观",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
+                letterSpacing = 0.5.sp,
                 color = TextTertiary,
                 modifier = Modifier.padding(horizontal = 2.dp)
             )
@@ -235,7 +237,7 @@ fun ProfileScreen(
                 "布局",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
+                letterSpacing = 0.5.sp,
                 color = TextTertiary,
                 modifier = Modifier.padding(horizontal = 2.dp)
             )
@@ -285,7 +287,7 @@ fun ProfileScreen(
                 "关于此配置",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
+                letterSpacing = 0.5.sp,
                 color = TextTertiary,
                 modifier = Modifier.padding(horizontal = 2.dp)
             )

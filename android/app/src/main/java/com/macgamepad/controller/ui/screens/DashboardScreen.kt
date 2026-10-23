@@ -29,6 +29,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.util.lerp
@@ -253,6 +254,8 @@ fun DashboardScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Brush.verticalGradient(listOf(Bg0, Bg1, Bg1)))
+            .statusBarsPadding()
+            .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -272,6 +275,7 @@ fun DashboardScreen(
         ) {
             // Logo mark + title
             Row(
+                modifier = Modifier.weight(1f, fill = false),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -286,8 +290,16 @@ fun DashboardScreen(
                     drawCircle(AccentCyan.copy(alpha = 0.85f), radius = 2.5f, center = Offset(cx + 5f, cy + 5f))
                 }
                 Column {
-                    Text("MacGamepad", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.3).sp, color = TextPrimary)
-                    Text("蓝牙手柄", fontSize = 9.sp, color = TextTertiary, letterSpacing = 0.3.sp)
+                    Text(
+                        "MacGamepad",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = (-0.3).sp,
+                        color = TextPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text("蓝牙手柄", fontSize = 9.sp, color = TextTertiary, letterSpacing = 0.3.sp, maxLines = 1)
                 }
             }
 
@@ -324,6 +336,7 @@ fun DashboardScreen(
                 // Connection status pill
                 Row(
                     modifier = Modifier
+                        .widthIn(max = 118.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (isConnected) StatusConnected.copy(alpha = 0.08f) else Bg3)
                         .border(
@@ -341,7 +354,10 @@ fun DashboardScreen(
                         text = if (isConnected) (connectedDeviceName ?: "已连接") else "未连接",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (isConnected) StatusConnected else TextSecondary
+                        color = if (isConnected) StatusConnected else TextSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false)
                     )
                     if (isConnected) { Icon(Icons.Default.Close, null, tint = AccentRed.copy(alpha = 0.6f), modifier = Modifier.size(10.dp)) }
                 }
@@ -360,7 +376,7 @@ fun DashboardScreen(
                 "手柄外观",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
+                letterSpacing = 0.5.sp,
                 color = TextTertiary
             )
             // Pager dots
@@ -429,8 +445,24 @@ fun DashboardScreen(
                         ) {
                             Text(profile.tagline, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.5.sp, color = profile.accentColor)
                         }
-                        Text(profile.name, fontSize = 24.sp, fontWeight = FontWeight.Black, letterSpacing = (-0.5).sp, color = TextPrimary, lineHeight = 26.sp)
-                        Text(profile.description, fontSize = 10.sp, color = TextSecondary, lineHeight = 15.sp)
+                        Text(
+                            profile.name,
+                            fontSize = 21.sp,
+                            fontWeight = FontWeight.Black,
+                            letterSpacing = (-0.5).sp,
+                            color = TextPrimary,
+                            lineHeight = 24.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            profile.description,
+                            fontSize = 10.sp,
+                            color = TextSecondary,
+                            lineHeight = 15.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                     // Right: controller art (clean, no gradients)
                     Canvas(modifier = Modifier.size(110.dp, 80.dp)) {
@@ -457,7 +489,7 @@ fun DashboardScreen(
                 "设置",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                letterSpacing = 1.2.sp,
+                letterSpacing = 0.5.sp,
                 color = TextTertiary,
                 modifier = Modifier.padding(bottom = 10.dp)
             )

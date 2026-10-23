@@ -58,6 +58,7 @@ fun SettingsScreen(
         modifier = modifier
             .fillMaxSize()
             .background(Bg1)
+            .navigationBarsPadding()
             .verticalScroll(scrollState)
     ) {
         // ── Header ──────────────────────────────────────────────────────────
@@ -65,6 +66,7 @@ fun SettingsScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Bg2)
+                .statusBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 14.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -343,7 +345,7 @@ private fun SettingsSection(title: String, content: @Composable ColumnScope.() -
             title,
             fontSize = 10.sp,
             fontWeight = FontWeight.Bold,
-            letterSpacing = 1.2.sp,
+            letterSpacing = 0.5.sp,
             color = TextTertiary,
             modifier = Modifier.padding(horizontal = 2.dp)
         )
