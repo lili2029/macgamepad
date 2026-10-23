@@ -55,7 +55,7 @@ val controllerProfiles = listOf(
     ControllerProfile(
         name        = "DualSense",
         tagline     = "PlayStation 5",
-        description = "Symmetric sticks · PS glyphs · Touchpad · Adaptive",
+        description = "对称摇杆 · PS 图标 · 触控板 · 自适应扳机",
         brandIcon   = "▲",
         primaryColor = ProfileColors.PsWhite,
         accentColor  = ProfileColors.PsBlue,
@@ -65,7 +65,7 @@ val controllerProfiles = listOf(
     ControllerProfile(
         name        = "Xbox Wireless",
         tagline     = "Series X / S",
-        description = "Offset sticks · A/B/X/Y · Bumpers · Vibration",
+        description = "非对称摇杆 · ABXY · 肩键 · 震动",
         brandIcon   = "✕",
         primaryColor = ProfileColors.XboxBlack,
         accentColor  = ProfileColors.XboxGreen,
@@ -75,7 +75,7 @@ val controllerProfiles = listOf(
     ControllerProfile(
         name        = "Switch Pro",
         tagline     = "Nintendo Switch",
-        description = "Joy-Con layout · B/A/Y/X · ZL/ZR · Home",
+        description = "Joy-Con 布局 · BAYX · ZL/ZR · Home 键",
         brandIcon   = "✚",
         primaryColor = SurfaceVariant,
         accentColor  = ProfileColors.SwitchBlue,
@@ -287,7 +287,7 @@ fun DashboardScreen(
                 }
                 Column {
                     Text("MacGamepad", fontSize = 16.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = (-0.3).sp, color = TextPrimary)
-                    Text("Bluetooth Controller", fontSize = 9.sp, color = TextTertiary, letterSpacing = 0.3.sp)
+                    Text("蓝牙手柄", fontSize = 9.sp, color = TextTertiary, letterSpacing = 0.3.sp)
                 }
             }
 
@@ -338,7 +338,7 @@ fun DashboardScreen(
                 ) {
                     Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(if (isConnected) StatusConnected else StatusConnecting))
                     Text(
-                        text = if (isConnected) (connectedDeviceName ?: "Connected") else "Disconnected",
+                        text = if (isConnected) (connectedDeviceName ?: "已连接") else "未连接",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = if (isConnected) StatusConnected else TextSecondary
@@ -357,7 +357,7 @@ fun DashboardScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                "CONTROLLER SKIN",
+                "手柄外观",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp,
@@ -454,7 +454,7 @@ fun DashboardScreen(
             verticalArrangement = Arrangement.spacedBy(0.dp)
         ) {
             Text(
-                "SETTINGS",
+                "设置",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp,
@@ -466,8 +466,8 @@ fun DashboardScreen(
             SettingRow(
                 icon = Icons.Default.Gamepad,
                 iconTint = AccentBlue,
-                title = "Output Protocol",
-                subtitle = "How your Mac reads the inputs"
+                title = "输出协议",
+                subtitle = "Mac 如何接收按键输入"
             ) {
                 // Segmented control
                 Row(
@@ -479,8 +479,8 @@ fun DashboardScreen(
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     listOf(
-                        GamepadService.Companion.Mode.GAMEPAD to "Gamepad",
-                        GamepadService.Companion.Mode.KEYBOARD to "Keyboard"
+                        GamepadService.Companion.Mode.GAMEPAD to "手柄",
+                        GamepadService.Companion.Mode.KEYBOARD to "键盘"
                     ).forEach { (m, label) ->
                         val selected = mode == m
                         Text(
@@ -514,7 +514,7 @@ fun DashboardScreen(
                         .padding(horizontal = 10.dp, vertical = 7.dp)
                 ) {
                     Text(
-                        "Tip: In emulators, select your controller (not Keyboard) in Player 1 settings.",
+                        "提示：模拟器里请把「1P 控制器」设为手柄，而不是键盘。",
                         fontSize = 9.sp,
                         color = AccentAmber.copy(alpha = 0.85f),
                         lineHeight = 13.sp
@@ -530,7 +530,7 @@ fun DashboardScreen(
             SliderSettingRow(
                 icon = Icons.Default.Tune,
                 iconTint = AccentPurple,
-                title = "Stick Sensitivity",
+                title = "摇杆灵敏度",
                 value = sensitivity,
                 displayValue = "${(sensitivity * 100).toInt()}%",
                 valueRange = 0.5f..2.0f,
@@ -544,7 +544,7 @@ fun DashboardScreen(
             SliderSettingRow(
                 icon = Icons.Default.CenterFocusWeak,
                 iconTint = AccentCyan,
-                title = "Stick Dead Zone",
+                title = "摇杆死区",
                 value = deadZone,
                 displayValue = "${(deadZone * 100).toInt()}%",
                 valueRange = 0.05f..0.30f,
@@ -592,8 +592,8 @@ fun DashboardScreen(
                         Icon(Icons.Default.DashboardCustomize, null, tint = AccentBlue.copy(alpha = if (isConnected) 1f else 0.3f), modifier = Modifier.size(16.dp))
                     }
                     Column {
-                        Text("Customize Layout", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (isConnected) TextPrimary else TextTertiary)
-                        Text("Drag & pinch buttons, sticks", fontSize = 9.sp, color = TextTertiary)
+                        Text("自定义布局", fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = if (isConnected) TextPrimary else TextTertiary)
+                        Text("拖动 / 双指缩放按键与摇杆", fontSize = 9.sp, color = TextTertiary)
                     }
                 }
                 Icon(
@@ -642,7 +642,7 @@ fun DashboardScreen(
                     modifier = Modifier.size(20.dp)
                 )
                 Text(
-                    if (isConnected) "Launch ${currentProfile.name}" else "Connect to Mac First",
+                    if (isConnected) "启动 ${currentProfile.name}" else "请先连接 Mac",
                     fontWeight = FontWeight.ExtraBold,
                     fontSize = 15.sp,
                     color = if (isConnected) Color.White else TextTertiary,

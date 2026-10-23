@@ -116,7 +116,7 @@ private fun DraggableLayoutElement(
                             textAlign = TextAlign.Center
                         )
                         Text(
-                            text = "drag · pinch",
+                            text = "拖动 · 缩放",
                             color = Color(0xFF5BE9F0).copy(alpha = 0.45f),
                             fontSize = 7.sp,
                             textAlign = TextAlign.Center
@@ -248,7 +248,7 @@ fun GamepadScreen(
                 externalScale  = scale("shoulderL"),
                 onOffsetChanged = onOffsetChanged,
                 onScaleChanged  = onScaleChanged,
-                label = "L Shoulders"
+                label = "左肩键"
             ) {
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ShoulderButton(
@@ -272,7 +272,7 @@ fun GamepadScreen(
                 externalScale  = scale("sysButtons"),
                 onOffsetChanged = onOffsetChanged,
                 onScaleChanged  = onScaleChanged,
-                label = "System"
+                label = "系统键"
             ) {
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -327,7 +327,7 @@ fun GamepadScreen(
                                     },
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text("TOUCHPAD", fontSize = 7.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
+                                Text("触控板", fontSize = 7.sp, color = TextSecondary, fontWeight = FontWeight.Bold)
                             }
                         }
                         "xbox" -> {
@@ -378,7 +378,7 @@ fun GamepadScreen(
                 externalScale  = scale("shoulderR"),
                 onOffsetChanged = onOffsetChanged,
                 onScaleChanged  = onScaleChanged,
-                label = "R Shoulders"
+                label = "右肩键"
             ) {
                 Row(
                     horizontalArrangement = Arrangement.End,
@@ -408,7 +408,7 @@ fun GamepadScreen(
                                 .clickable { onEnterEditMode() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Edit, contentDescription = "Edit layout", tint = skin.accent.copy(alpha = 0.8f), modifier = Modifier.size(15.dp))
+                            Icon(Icons.Default.Edit, contentDescription = "编辑布局", tint = skin.accent.copy(alpha = 0.8f), modifier = Modifier.size(15.dp))
                         }
 
                         Spacer(Modifier.width(6.5.dp))
@@ -423,7 +423,7 @@ fun GamepadScreen(
                                 .clickable { onBackToDashboard() },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Default.Close, contentDescription = "Exit", tint = AccentRed.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
+                            Icon(Icons.Default.Close, contentDescription = "退出", tint = AccentRed.copy(alpha = 0.6f), modifier = Modifier.size(14.dp))
                         }
                     }
                 }
@@ -453,7 +453,7 @@ fun GamepadScreen(
                     externalScale  = scale("leftStick"),
                     onOffsetChanged = onOffsetChanged,
                     onScaleChanged  = onScaleChanged,
-                    label = "Left Stick",
+                    label = "左摇杆",
                     modifier = Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 2.dp)
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -480,7 +480,7 @@ fun GamepadScreen(
                     externalScale  = scale("dpad"),
                     onOffsetChanged = onOffsetChanged,
                     onScaleChanged  = onScaleChanged,
-                    label = "D-Pad",
+                    label = "十字键",
                     modifier = Modifier.align(Alignment.BottomCenter)
                 ) {
                     DPad(
@@ -547,7 +547,7 @@ fun GamepadScreen(
                     externalScale  = scale("rightStick"),
                     onOffsetChanged = onOffsetChanged,
                     onScaleChanged  = onScaleChanged,
-                    label = "Right Stick",
+                    label = "右摇杆",
                     modifier = Modifier.align(Alignment.BottomEnd).padding(end = 20.dp)
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -584,7 +584,7 @@ fun GamepadScreen(
                     externalScale  = scale("dpad"),
                     onOffsetChanged = onOffsetChanged,
                     onScaleChanged  = onScaleChanged,
-                    label = "D-Pad",
+                    label = "十字键",
                     modifier = Modifier.align(Alignment.TopStart).padding(start = 8.dp, top = 2.dp)
                 ) {
                     DPad(padSize = dpadSize, onDirectionChanged = { u, d, l, r ->
@@ -598,7 +598,7 @@ fun GamepadScreen(
                     externalScale  = scale("leftStick"),
                     onOffsetChanged = onOffsetChanged,
                     onScaleChanged  = onScaleChanged,
-                    label = "Left Stick",
+                    label = "左摇杆",
                     modifier = Modifier.align(Alignment.BottomCenter)
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -656,7 +656,7 @@ fun GamepadScreen(
                     externalScale  = scale("rightStick"),
                     onOffsetChanged = onOffsetChanged,
                     onScaleChanged  = onScaleChanged,
-                    label = "Right Stick",
+                    label = "右摇杆",
                     modifier = Modifier.align(Alignment.BottomCenter)
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -686,13 +686,13 @@ fun GamepadScreen(
                 ) {
                     Column {
                         Text(
-                            text = "Layout Customizer",
+                            text = "布局自定义",
                             color = AccentCyan,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Drag to move · Pinch to scale",
+                            text = "拖动移动 · 双指缩放",
                             color = TextSecondary,
                             fontSize = 8.sp
                         )
@@ -715,7 +715,7 @@ fun GamepadScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(Icons.Default.Refresh, null, tint = TextSecondary, modifier = Modifier.size(11.dp))
-                                Text("Reset", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                Text("重置", color = TextSecondary, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
 
@@ -732,7 +732,7 @@ fun GamepadScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(Icons.Default.Check, null, tint = Color.Black, modifier = Modifier.size(11.dp))
-                                Text("Save", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("保存", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

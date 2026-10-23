@@ -397,8 +397,8 @@ class GamepadService : Service(), SensorEventListener {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("MacGamepad Connected")
-            .setContentText("Emulating native controller via Bluetooth HID")
+            .setContentTitle("Mac 手柄已连接")
+            .setContentText("正通过蓝牙 HID 模拟原生手柄")
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth) // Use system icon for compatibility
             .setContentIntent(pendingIntent)
             .setPriority(NotificationCompat.PRIORITY_LOW)
@@ -410,10 +410,10 @@ class GamepadService : Service(), SensorEventListener {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "MacGamepad Connection Service",
+                "Mac 手柄连接服务",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps Bluetooth controller connection alive in background"
+                description = "让蓝牙手柄连接在后台保持不断开"
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)

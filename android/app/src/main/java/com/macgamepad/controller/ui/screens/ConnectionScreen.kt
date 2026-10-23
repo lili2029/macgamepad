@@ -205,7 +205,7 @@ fun ConnectionScreen(
                 }
             )
             Text(
-                text = "Bluetooth Game Controller",
+                text = "蓝牙游戏手柄",
                 fontSize = 12.sp,
                 color = TextSecondary,
                 textAlign = TextAlign.Center,
@@ -259,7 +259,7 @@ fun ConnectionScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                "Register this phone as a Bluetooth HID controller.\nThen pair from your Mac's Bluetooth settings.",
+                                "将本机注册为蓝牙 HID 手柄。\n然后在 Mac 的「蓝牙」设置里配对连接。",
                                 fontSize = 11.sp,
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center,
@@ -281,7 +281,7 @@ fun ConnectionScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(Icons.Default.Bluetooth, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                                    Text("Initialize Controller", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
+                                    Text("初始化手柄", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
                                 }
                             }
                         }
@@ -299,7 +299,7 @@ fun ConnectionScreen(
                                 strokeWidth = 2.5.dp
                             )
                             Text(
-                                "Setting up Bluetooth profile...",
+                                "正在注册蓝牙 HID 配置…",
                                 fontSize = 12.sp,
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center
@@ -316,7 +316,7 @@ fun ConnectionScreen(
                             PulsingBeacon()
 
                             Text(
-                                "Discoverable — waiting for Mac",
+                                "可被发现 · 等待 Mac 连接",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
@@ -332,10 +332,10 @@ fun ConnectionScreen(
                                     .padding(14.dp),
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
-                                Text("Pairing Guide", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.5.sp)
-                                PairingStepRow("1", "Open Bluetooth settings on your Mac")
-                                PairingStepRow("2", "Remove any old phone connection")
-                                PairingStepRow("3", "Find your phone name and click Connect")
+                                Text("配对指引", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.5.sp)
+                                PairingStepRow("1", "在 Mac 上打开「系统设置 → 蓝牙」")
+                                PairingStepRow("2", "先删掉旧的手机配对记录")
+                                PairingStepRow("3", "找到本机名称，点「连接」")
                             }
 
                             // Paired hosts quick-connect list
@@ -357,14 +357,14 @@ fun ConnectionScreen(
                             if (macHosts.isNotEmpty()) {
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text(
-                                        "QUICK CONNECT",
+                                        "快速连接",
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold,
                                         letterSpacing = 1.sp,
                                         color = TextTertiary
                                     )
                                     macHosts.forEach { device ->
-                                        val name = try { device.name ?: "Mac Host" } catch (e: SecurityException) { "Mac Host" }
+                                        val name = try { device.name ?: "Mac 主机" } catch (e: SecurityException) { "Mac 主机" }
                                         Row(
                                             modifier = Modifier
                                                 .fillMaxWidth()
@@ -411,13 +411,13 @@ fun ConnectionScreen(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Icon(Icons.Default.SportsEsports, null, tint = Color.White, modifier = Modifier.size(20.dp))
-                                    Text("Launch Controller", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.White)
+                                    Text("启动手柄", fontWeight = FontWeight.ExtraBold, fontSize = 15.sp, color = Color.White)
                                 }
                             }
 
                             // Disconnect link
                             Text(
-                                "Disconnect",
+                                "断开连接",
                                 fontSize = 12.sp,
                                 color = TextTertiary,
                                 modifier = Modifier
@@ -499,12 +499,12 @@ private fun ConnectionStatusBadge(
     deviceName: String?
 ) {
     val (label, color) = when (state) {
-        BluetoothGamepadService.ConnectionState.DISCONNECTED   -> "Not Connected" to StatusDisconnected
-        BluetoothGamepadService.ConnectionState.REGISTERING    -> "Registering…" to StatusConnecting
-        BluetoothGamepadService.ConnectionState.REGISTERED_WAITING -> "Discoverable" to StatusConnecting
-        BluetoothGamepadService.ConnectionState.CONNECTING     -> "Connecting…" to StatusConnecting
-        BluetoothGamepadService.ConnectionState.CONNECTED      -> "Connected · ${deviceName ?: "Mac"}" to StatusConnected
-        BluetoothGamepadService.ConnectionState.ERROR          -> "Error" to StatusDisconnected
+        BluetoothGamepadService.ConnectionState.DISCONNECTED   -> "未连接" to StatusDisconnected
+        BluetoothGamepadService.ConnectionState.REGISTERING    -> "注册中…" to StatusConnecting
+        BluetoothGamepadService.ConnectionState.REGISTERED_WAITING -> "可被发现" to StatusConnecting
+        BluetoothGamepadService.ConnectionState.CONNECTING     -> "连接中…" to StatusConnecting
+        BluetoothGamepadService.ConnectionState.CONNECTED      -> "已连接 · ${deviceName ?: "Mac"}" to StatusConnected
+        BluetoothGamepadService.ConnectionState.ERROR          -> "出错" to StatusDisconnected
     }
 
     Row(

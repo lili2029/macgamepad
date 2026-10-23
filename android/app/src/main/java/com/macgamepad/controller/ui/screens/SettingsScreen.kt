@@ -84,7 +84,7 @@ fun SettingsScreen(
                 ) {
                     Icon(Icons.Default.ArrowBackIosNew, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
                 }
-                Text("Settings", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                Text("设置", fontSize = 17.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
             }
         }
 
@@ -98,13 +98,13 @@ fun SettingsScreen(
         ) {
 
             // ── Input ─────────────────────────────────────────────────────
-            SettingsSection(title = "INPUT") {
+            SettingsSection(title = "输入") {
                 // Sensitivity
                 SettingsSliderRow(
                     icon = Icons.Default.Tune,
                     iconTint = AccentPurple,
-                    title = "Stick Sensitivity",
-                    subtitle = "How far inputs are amplified",
+                    title = "摇杆灵敏度",
+                    subtitle = "输入放大倍率",
                     value = sensitivity,
                     displayValue = "${(sensitivity * 100).toInt()}%",
                     valueRange = 0.5f..2.0f,
@@ -117,8 +117,8 @@ fun SettingsScreen(
                 SettingsSliderRow(
                     icon = Icons.Default.CenterFocusWeak,
                     iconTint = AccentCyan,
-                    title = "Dead Zone",
-                    subtitle = "Ignore small accidental movements",
+                    title = "死区",
+                    subtitle = "忽略轻微的误触抖动",
                     value = deadZone,
                     displayValue = "${(deadZone * 100).toInt()}%",
                     valueRange = 0.05f..0.35f,
@@ -131,8 +131,8 @@ fun SettingsScreen(
                 SettingsRow(
                     icon = Icons.Default.Gamepad,
                     iconTint = AccentBlue,
-                    title = "Output Mode",
-                    subtitle = "How your Mac reads the controller"
+                    title = "输出模式",
+                    subtitle = "Mac 如何识别这只手柄"
                 ) {
                     Row(
                         modifier = Modifier
@@ -143,8 +143,8 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         listOf(
-                            GamepadService.Companion.Mode.GAMEPAD to "Gamepad",
-                            GamepadService.Companion.Mode.KEYBOARD to "Keyboard"
+                            GamepadService.Companion.Mode.GAMEPAD to "手柄",
+                            GamepadService.Companion.Mode.KEYBOARD to "键盘"
                         ).forEach { (m, label) ->
                             val selected = mode == m
                             Text(
@@ -164,12 +164,12 @@ fun SettingsScreen(
             }
 
             // ── Haptics ───────────────────────────────────────────────────
-            SettingsSection(title = "HAPTICS") {
+            SettingsSection(title = "触感") {
                 SettingsToggleRow(
                     icon = Icons.Default.Vibration,
                     iconTint = AccentGreen,
-                    title = "Haptic Feedback",
-                    subtitle = "Vibration on button presses",
+                    title = "触感反馈",
+                    subtitle = "按下按键时震动",
                     checked = hapticEnabled,
                     onCheckedChange = onHapticEnabledChange
                 )
@@ -178,8 +178,8 @@ fun SettingsScreen(
                     SettingsSliderRow(
                         icon = Icons.Default.GraphicEq,
                         iconTint = AccentGreen,
-                        title = "Intensity",
-                        subtitle = "Strength of haptic pulses",
+                        title = "震动强度",
+                        subtitle = "触感震动的力度",
                         value = hapticStrength,
                         displayValue = "${(hapticStrength * 100).toInt()}%",
                         valueRange = 0.1f..1.0f,
@@ -191,27 +191,27 @@ fun SettingsScreen(
                 SettingsToggleRow(
                     icon = Icons.Default.PhoneAndroid,
                     iconTint = AccentBlue,
-                    title = "Controller Vibration",
-                    subtitle = "Receive rumble events from Mac",
+                    title = "手柄震动",
+                    subtitle = "接收来自 Mac 的震动指令",
                     checked = vibrationEnabled,
                     onCheckedChange = onVibrationChange
                 )
             }
 
             // ── Connection ────────────────────────────────────────────────
-            SettingsSection(title = "CONNECTION") {
+            SettingsSection(title = "连接") {
                 SettingsToggleRow(
                     icon = Icons.Default.Autorenew,
                     iconTint = AccentCyan,
-                    title = "Auto-Reconnect",
-                    subtitle = "Reconnect to last host on app launch",
+                    title = "自动重连",
+                    subtitle = "打开 App 时自动连回上次的主机",
                     checked = autoReconnect,
                     onCheckedChange = onAutoReconnectChange
                 )
             }
 
             // ── Storage ───────────────────────────────────────────────────
-            SettingsSection(title = "STORAGE") {
+            SettingsSection(title = "存储") {
                 // Storage usage
                 Row(
                     modifier = Modifier
@@ -228,8 +228,8 @@ fun SettingsScreen(
                             Icon(Icons.Default.Storage, null, tint = AccentAmber, modifier = Modifier.size(17.dp))
                         }
                         Column {
-                            Text("App Data Size", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                            Text("Settings + all layout data", fontSize = 10.sp, color = TextSecondary)
+                            Text("应用数据占用", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("设置与全部布局数据", fontSize = 10.sp, color = TextSecondary)
                         }
                     }
                     Text(
@@ -258,8 +258,8 @@ fun SettingsScreen(
                             Icon(Icons.Default.DeleteOutline, null, tint = AccentRed, modifier = Modifier.size(17.dp))
                         }
                         Column {
-                            Text("Clear All Layouts", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = AccentRed)
-                            Text("Resets button positions for all profiles", fontSize = 10.sp, color = TextSecondary)
+                            Text("清除全部布局", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = AccentRed)
+                            Text("重置所有手柄的按键位置", fontSize = 10.sp, color = TextSecondary)
                         }
                     }
                     Icon(Icons.Default.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(15.dp))
@@ -267,7 +267,7 @@ fun SettingsScreen(
             }
 
             // ── About ─────────────────────────────────────────────────────
-            SettingsSection(title = "ABOUT") {
+            SettingsSection(title = "关于") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -286,15 +286,15 @@ fun SettingsScreen(
                     }
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "Turn your Android phone into a Bluetooth game controller for Mac.",
+                        "把安卓手机变成 Mac 的蓝牙游戏手柄。",
                         fontSize = 11.sp,
                         color = TextSecondary,
                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                         lineHeight = 16.sp
                     )
                     Spacer(Modifier.height(4.dp))
-                    Text("Supports PS5 · Xbox · Nintendo Switch Pro profiles", fontSize = 10.sp, color = TextTertiary)
-                    Text("HID-over-Bluetooth · macOS compatible", fontSize = 10.sp, color = TextTertiary)
+                    Text("支持 PS5 · Xbox · Switch Pro 三种手柄配置", fontSize = 10.sp, color = TextTertiary)
+                    Text("蓝牙 HID · 兼容 macOS", fontSize = 10.sp, color = TextTertiary)
                 }
             }
 
@@ -309,11 +309,11 @@ fun SettingsScreen(
             containerColor = Bg3,
             tonalElevation = 0.dp,
             title = {
-                Text("Clear All Layouts?", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
+                Text("清除全部布局？", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
             },
             text = {
                 Text(
-                    "This will reset button positions and sizes for all 3 controller profiles. This cannot be undone.",
+                    "将重置全部 3 种手柄的按键位置与大小，此操作无法撤销。",
                     color = TextSecondary,
                     fontSize = 12.sp,
                     lineHeight = 17.sp
@@ -321,12 +321,12 @@ fun SettingsScreen(
             },
             confirmButton = {
                 TextButton(onClick = { onClearAllLayouts(); showClearConfirm = false }) {
-                    Text("Clear All", color = AccentRed, fontWeight = FontWeight.Bold)
+                    Text("全部清除", color = AccentRed, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showClearConfirm = false }) {
-                    Text("Cancel", color = TextSecondary)
+                    Text("取消", color = TextSecondary)
                 }
             }
         )

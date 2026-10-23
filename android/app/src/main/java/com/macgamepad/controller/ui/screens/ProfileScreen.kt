@@ -73,7 +73,7 @@ fun ProfileScreen(
                     Icon(Icons.Default.ArrowBackIosNew, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
                 }
                 Text(
-                    "Controller Profile",
+                    "手柄配置",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
@@ -103,14 +103,14 @@ fun ProfileScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     Text(
-                        "Connected Host",
+                        "已连接主机",
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = TextTertiary,
                         letterSpacing = 0.5.sp
                     )
                     Text(
-                        if (isConnected) connectedDeviceName ?: "Connected" else "Not connected",
+                        if (isConnected) connectedDeviceName ?: "已连接" else "未连接",
                         fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = if (isConnected) TextPrimary else TextTertiary
@@ -125,7 +125,7 @@ fun ProfileScreen(
                             .background(if (isConnected) StatusConnected else StatusDisconnected)
                     )
                     Text(
-                        if (isConnected) "Active" else "Offline",
+                        if (isConnected) "在线" else "离线",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = if (isConnected) StatusConnected else StatusDisconnected
@@ -135,7 +135,7 @@ fun ProfileScreen(
 
             // ── Profile picker section label ──────────────────────────────
             Text(
-                "CONTROLLER SKIN",
+                "手柄外观",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp,
@@ -232,7 +232,7 @@ fun ProfileScreen(
             // ── Layout management ─────────────────────────────────────────
             val activeProfile = controllerProfiles.firstOrNull { it.id == activeProfileId }
             Text(
-                "LAYOUT",
+                "布局",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp,
@@ -255,8 +255,8 @@ fun ProfileScreen(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Column {
-                        Text("${activeProfile?.name ?: ""} Layout", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                        Text("Custom button positions & sizes for this profile", fontSize = 11.sp, color = TextSecondary)
+                        Text("${activeProfile?.name ?: ""} 布局", fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                        Text("当前配置下按键的位置与大小", fontSize = 11.sp, color = TextSecondary)
                     }
                 }
                 HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
@@ -272,8 +272,8 @@ fun ProfileScreen(
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.RestartAlt, null, tint = AccentAmber, modifier = Modifier.size(18.dp))
                         Column {
-                            Text("Reset to Default", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = AccentAmber)
-                            Text("Clears only this profile's layout", fontSize = 10.sp, color = TextTertiary)
+                            Text("恢复默认", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = AccentAmber)
+                            Text("仅清除当前配置的布局", fontSize = 10.sp, color = TextTertiary)
                         }
                     }
                     Icon(Icons.Default.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(15.dp))
@@ -282,7 +282,7 @@ fun ProfileScreen(
 
             // ── Controller info ───────────────────────────────────────────
             Text(
-                "ABOUT THIS PROFILE",
+                "关于此配置",
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 1.2.sp,
@@ -301,25 +301,25 @@ fun ProfileScreen(
             ) {
                 val (desc, btName, buttons) = when (activeProfileId) {
                     "ps5" -> Triple(
-                        "Emulates a Sony DualSense Wireless Controller. Your Mac recognizes it as a PS5 gamepad — works with all games that support DualSense.",
+                        "模拟索尼 DualSense 无线手柄，Mac 会把它识别为 PS5 手柄，支持所有认 DualSense 的游戏。",
                         "DualSense Wireless Controller",
-                        "Cross · Circle · Square · Triangle · L1/L2/R1/R2 · L3/R3 · Touchpad · PS"
+                        "✕ · ○ · □ · △ · L1/L2/R1/R2 · L3/R3 · 触控板 · PS"
                     )
                     "xbox" -> Triple(
-                        "Emulates an Xbox Wireless Controller. Windows-compatible layout recognized by macOS as an Xbox gamepad — ideal for games with Xbox controller support.",
+                        "模拟 Xbox 无线手柄，macOS 会把它识别为 Xbox 手柄，适合原生支持 Xbox 手柄的游戏。",
                         "Xbox Wireless Controller",
                         "A · B · X · Y · LB/LT/RB/RT · Back · Start · Xbox"
                     )
                     else -> Triple(
-                        "Emulates a Nintendo Switch Pro Controller. Recognized by emulators (Ryujinx, Yuzu) as a Pro Controller — ideal for Switch game library.",
+                        "模拟任天堂 Switch Pro 手柄，模拟器（Ryujinx、Yuzu）会识别为 Pro Controller，适合玩 Switch 游戏。",
                         "Pro Controller",
                         "B · A · Y · X · L/ZL/R/ZR · − · + · Home · Capture"
                     )
                 }
 
-                ProfileInfoRow("Appears As", btName)
+                ProfileInfoRow("系统识别为", btName)
                 HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
-                ProfileInfoRow("Button Layout", buttons)
+                ProfileInfoRow("按键布局", buttons)
                 HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
 
                 Text(

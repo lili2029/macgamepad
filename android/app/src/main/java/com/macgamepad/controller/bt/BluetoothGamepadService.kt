@@ -161,13 +161,13 @@ class BluetoothGamepadService(private val context: Context) {
         bluetoothAdapter = bluetoothManager?.adapter
 
         if (bluetoothAdapter == null) {
-            _errorMessage.value = "Bluetooth not available on this device"
+            _errorMessage.value = "此设备不支持蓝牙"
             _connectionState.value = ConnectionState.ERROR
             return
         }
 
         if (bluetoothAdapter?.isEnabled != true) {
-            _errorMessage.value = "Bluetooth is not enabled"
+            _errorMessage.value = "蓝牙未开启"
             _connectionState.value = ConnectionState.ERROR
             return
         }
@@ -289,7 +289,7 @@ class BluetoothGamepadService(private val context: Context) {
     @SuppressLint("MissingPermission")
     private fun registerHidApp() {
         val hid = hidDevice ?: run {
-            _errorMessage.value = "HID Device proxy not available"
+            _errorMessage.value = "HID 设备代理不可用"
             _connectionState.value = ConnectionState.ERROR
             return
         }
@@ -330,7 +330,7 @@ class BluetoothGamepadService(private val context: Context) {
         if (result) {
             Log.i(TAG, "✅ registerApp() succeeded — waiting for callback...")
         } else {
-            _errorMessage.value = "Failed to register HID app. Is Bluetooth HID Device profile supported?"
+            _errorMessage.value = "注册 HID 应用失败，此设备可能不支持蓝牙 HID 设备配置文件"
             _connectionState.value = ConnectionState.ERROR
             Log.e(TAG, "❌ registerApp() returned false")
         }
