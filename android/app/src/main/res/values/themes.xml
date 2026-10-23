@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.MacGamepad" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">#FF0D0D0D</item>
+        <item name="android:statusBarColor">#FF0D0D0D</item>
+        <item name="android:navigationBarColor">#FF0D0D0D</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
+    </style>
+</resources>

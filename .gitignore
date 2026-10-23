@@ -1,0 +1,11 @@
+.gradle
+local.properties
+.idea/
+.DS_Store
+build/
+android/build/
+android/app/build/
+*.class
+*.apk
+*.aar
+tools/gamepad_tester

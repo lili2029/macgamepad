@@ -1,0 +1,23 @@
+[Diagnose] Listening for reports from phone (VID: 0x001D, PID: 0x1200)...
+[Diagnose] Press buttons / move sticks on phone to test.
+[Diagnose] Press Ctrl+C to exit.
+
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
+[Diagnose] Received Report (ID: 1, Len: 14): 01 00 00 00 00 00 00 00 00 0F 00 01 00 00 
