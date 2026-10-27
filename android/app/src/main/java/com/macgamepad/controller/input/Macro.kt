@@ -323,21 +323,6 @@ object MacroLibrary {
     )
 
     /**
-     * The exact shape the editor was built around: hold ZL, press X while it is
-     * still down, then A. Each press keeps its own window, so the overlap is what
-     * the game sees.
-     */
-    val zlHoldXThenA = Macro(
-        id = "zl_x_a",
-        name = "ZL 长按 + X → A",
-        steps = listOf(
-            MacroStep(start = 0, ticks = 32, state = InputState(leftTrigger = 1f)),
-            MacroStep(start = 6, ticks = 4, state = InputState(buttonX = true)),
-            MacroStep(start = 18, ticks = 4, state = InputState(buttonA = true))
-        )
-    )
-
-    /**
      * The classic "Y+B" duplication input: with materials held in the pouch menu,
      * Y and B have to arrive in the *same* report. Split across two frames the game
      * reads B (close the menu) and then Y (throw/attack), which is why doing this
@@ -354,33 +339,7 @@ object MacroLibrary {
         )
     )
 
-    /** Mash A five times, for dialogue and "press repeatedly" prompts: one turbo press. */
-    val mashA = Macro(
-        id = "mash_a",
-        name = "连发 A ×5",
-        steps = listOf(
-            MacroStep(
-                start = 0,
-                ticks = 18,
-                state = InputState(buttonA = true),
-                mode = PressMode.TURBO,
-                burstTicks = 2,
-                gapTicks = 2
-            )
-        )
-    )
-
-    /** Dodge/backstep style: B then X, the second input inside the first's recovery. */
-    val bIntoX = Macro(
-        id = "b_into_x",
-        name = "B → X 连招",
-        steps = listOf(
-            MacroStep(start = 0, ticks = 3, state = InputState(buttonB = true)),
-            MacroStep(start = 4, ticks = 3, state = InputState(buttonX = true))
-        )
-    )
-
-    val all: List<Macro> = listOf(zlACombo, zlHoldXThenA, ybDupe, mashA, bIntoX)
+    val all: List<Macro> = listOf(zlACombo, ybDupe)
 
     /** Factory versions, before any user edit. [MacroStore] layers overrides on top. */
     val defaults: List<Macro> get() = all

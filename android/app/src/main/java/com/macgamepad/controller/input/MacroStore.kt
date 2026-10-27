@@ -211,10 +211,11 @@ fun Macro.sanitized(): Macro {
 /**
  * Persists the macro list.
  *
- * Three built-ins ship with the app and live in [MacroLibrary]; anything the user
+ * The built-ins ship with the app and live in [MacroLibrary]; anything the user
  * edits is written into an `overrides` table keyed by the built-in id, so a later
  * app update can still improve a built-in the user never touched. Macros created
- * from scratch go into `custom` and can be deleted for real.
+ * from scratch go into `custom` and can be deleted for real. Overrides for an id
+ * that no longer ships (a built-in that was dropped) are simply left unread.
  */
 class MacroStore(private val prefs: SharedPreferences) {
 
