@@ -2,16 +2,17 @@ package com.macgamepad.controller.ui.screens
 
 import androidx.compose.animation.*
 import androidx.compose.animation.core.*
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -34,6 +35,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import com.macgamepad.controller.input.InputState
 import com.macgamepad.controller.input.Macro
 import com.macgamepad.controller.ui.components.*
@@ -902,6 +905,12 @@ fun GamepadScreen(
 // Long-pressing the macro button opens this instead of silently cycling: the
 // player gets to see what each script does (step count and length) and can jump
 // straight into the editor. The HID side is unaffected either way.
+//
+// A plain AlertDialog wasted the screen: its title block and button row are fixed
+// heights, so with a dozen macros the list itself only showed two and a half rows.
+// This dialog is a plain sheet pinned to 90% of the window height instead — the
+// header and footer are two thin rows and everything in between belongs to the
+// list, which is the part worth scrolling.
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun MacroPickerDialog(
@@ -913,25 +922,58 @@ private fun MacroPickerDialog(
     onRecord: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    AlertDialog(
+    Dialog(
         onDismissRequest = onDismiss,
-        containerColor = Bg2,
-        tonalElevation = 0.dp,
-        title = {
-            Column {
-                Text("宏", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
-                Text(
-                    "点一下切换，右侧铅笔进入编辑",
-                    fontSize = 10.sp,
-                    color = TextTertiary,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Record entry sits above the list so it is the first thing a player
-                // who just wants to capture something sees.
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        // BoxWithConstraints so the sheet can be as tall as its content but never
+        // taller than the window: a fixed height either wastes half the screen with
+        // five macros or cramps the list with fifty.
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+        val listMaxHeight = maxHeight * 0.6f
+        Surface(
+            color = Bg2,
+            shape = RoundedCornerShape(16.dp),
+            border = BorderStroke(1.dp, BorderSubtle),
+            modifier = Modifier
+                .padding(horizontal = 12.dp, vertical = 8.dp)
+                // widthIn before fillMaxWidth: the other order pins the width to the
+                // window and the cap would be silently ignored.
+                .widthIn(max = 560.dp)
+                .fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+            ) {
+                // ── Header: one row, no subtitle block ──────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 2.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("宏", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
+                    Text("${macros.size} 个", fontSize = 9.sp, color = TextTertiary)
+                    Spacer(Modifier.weight(1f))
+                    Text("点一下切换 · ✎ 编辑", fontSize = 9.sp, color = TextTertiary)
+                    Box(
+                        modifier = Modifier
+                            .size(26.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable { onDismiss() },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                    }
+                }
+
+                // ── Record entry: single line, sits above the list ──────────
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -939,110 +981,160 @@ private fun MacroPickerDialog(
                         .background(RecordRed.copy(alpha = 0.10f))
                         .border(1.dp, RecordRed.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
                         .clickable { onRecord() }
-                        .padding(horizontal = 10.dp, vertical = 9.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(start = 10.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Box(
                         modifier = Modifier
-                            .size(8.dp)
+                            .size(7.dp)
                             .clip(CircleShape)
                             .background(RecordRed)
                     )
-                    Spacer(Modifier.width(8.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text("录制新宏", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RecordRed)
-                        Text(
-                            "边玩边录，点「停止」自动保存",
-                            fontSize = 9.sp,
-                            color = TextTertiary
-                        )
-                    }
+                    Text("录制新宏", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RecordRed)
+                    Text(
+                        "边玩边录，停止自动保存",
+                        fontSize = 9.sp,
+                        color = TextTertiary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
                     Icon(
                         Icons.Default.FiberManualRecord,
                         null,
                         tint = RecordRed.copy(alpha = 0.8f),
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(13.dp)
                     )
                 }
 
+                Spacer(Modifier.height(8.dp))
+                HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
+
+                // ── List: takes every pixel the header and footer leave ──────
                 if (macros.isEmpty()) {
-                    Text("还没有宏，直接从上面录一个吧。", fontSize = 12.sp, color = TextSecondary)
-                } else {
-                    Column(
+                    Box(
                         modifier = Modifier
-                            .heightIn(max = 240.dp)
-                            .verticalScroll(rememberScrollState()),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                            .fillMaxWidth()
+                            .height(120.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                    macros.forEach { m ->
-                        val selected = m.id == selectedId
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(if (selected) accent.copy(alpha = 0.14f) else Bg3)
-                                .border(
-                                    1.dp,
-                                    if (selected) accent.copy(alpha = 0.6f) else BorderSubtle,
-                                    RoundedCornerShape(10.dp)
-                                )
-                                .clickable { onSelect(m.id) }
-                                .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
+                        Text("还没有宏，从上面录一个吧。", fontSize = 12.sp, color = TextSecondary)
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 120.dp, max = listMaxHeight),
+                        contentPadding = PaddingValues(vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        items(macros, key = { it.id }) { m ->
+                            val selected = m.id == selectedId
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (selected) accent.copy(alpha = 0.14f) else Bg3)
+                                    .border(
+                                        1.dp,
+                                        if (selected) accent.copy(alpha = 0.6f) else BorderSubtle,
+                                        RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable { onSelect(m.id) }
+                                    .padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                // Name and timing share one line: in landscape the
+                                // scarce resource is height, and two-line rows only
+                                // fit three of them on screen.
                                 Text(
                                     m.name,
                                     fontSize = 12.sp,
                                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                     color = if (selected) accent else TextPrimary,
-                                    maxLines = 1
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
                                 )
                                 Text(
                                     "${m.steps.size} 段 · ${m.durationMs} ms",
                                     fontSize = 9.sp,
-                                    color = TextTertiary
+                                    color = TextTertiary,
+                                    maxLines = 1
                                 )
-                            }
-                            if (selected) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    null,
-                                    tint = accent,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(30.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable { onEdit(m.id) },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.Edit,
-                                    null,
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(15.dp)
-                                )
+                                if (selected) {
+                                    Icon(
+                                        Icons.Default.Check,
+                                        null,
+                                        tint = accent,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(30.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { onEdit(m.id) },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        null,
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(15.dp)
+                                    )
+                                }
                             }
                         }
                     }
                 }
-            }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onEdit(selectedId) }) {
-                Text("编辑当前", color = accent, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = { onEdit(null) }) {
-                Text("新建宏", color = TextSecondary)
+
+                HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
+
+                // ── Footer: two thin chips instead of a button row ──────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Bg3)
+                            .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
+                            .clickable { onEdit(null) }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("新建宏", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(accent.copy(alpha = 0.14f))
+                            .border(1.dp, accent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
+                            .clickable(enabled = selectedId != null) { onEdit(selectedId) }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            "编辑当前",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selectedId != null) accent else TextTertiary
+                        )
+                    }
+                }
             }
         }
-    )
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
