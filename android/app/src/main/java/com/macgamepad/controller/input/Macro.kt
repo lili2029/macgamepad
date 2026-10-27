@@ -259,35 +259,37 @@ object MacroLibrary {
     const val DEFAULT_ID = "zl_a_combo"
 
     /**
-     * The take the user settled on as the factory default (3.2 s, 11 presses): ZL
-     * held while X / A / START are tapped inside it, an A burst, the same-frame
-     * Y+B dupe chord, two downward stick flicks with A bursts between them. Kept in
-     * 8 ms ticks exactly as it was saved on the phone, so 「恢复默认」 gives this back.
+     * The take the user settled on as the factory default (3.4 s, 11 presses): ZL
+     * held for 520 ms while X / A / START are tapped inside it, an A burst, the
+     * same-frame Y+B dupe chord, two downward stick flicks with A bursts between
+     * them. The opening hold is deliberately 200 ms longer than the original take
+     * and everything after it sits 200 ms later, so the choreography inside the
+     * hold is unchanged while the hold itself lasts long enough to read.
      */
     val zlACombo = Macro(
         id = "zl_a_combo",
         name = "yb复制脚本",
         steps = listOf(
-            MacroStep(start = 0, ticks = 40, state = InputState(leftTrigger = 1f)),
-            MacroStep(start = 6, ticks = 3, state = InputState(buttonX = true)),
-            MacroStep(start = 11, ticks = 3, state = InputState(buttonA = true)),
-            MacroStep(start = 37, ticks = 3, state = InputState(buttonStart = true)),
-            MacroStep(start = 42, ticks = 3, state = InputState(buttonX = true)),
+            MacroStep(start = 0, ticks = 65, state = InputState(leftTrigger = 1f)),
+            MacroStep(start = 31, ticks = 3, state = InputState(buttonX = true)),
+            MacroStep(start = 36, ticks = 3, state = InputState(buttonA = true)),
+            MacroStep(start = 62, ticks = 3, state = InputState(buttonStart = true)),
+            MacroStep(start = 67, ticks = 3, state = InputState(buttonX = true)),
             MacroStep(
-                start = 48, ticks = 38,
+                start = 73, ticks = 38,
                 state = InputState(buttonA = true),
                 mode = PressMode.TURBO, burstTicks = 6, gapTicks = 2
             ),
-            MacroStep(start = 89, ticks = 3, state = InputState(buttonB = true, buttonY = true)),
-            MacroStep(start = 113, ticks = 27, state = InputState(leftStickY = 1f)),
+            MacroStep(start = 114, ticks = 3, state = InputState(buttonB = true, buttonY = true)),
+            MacroStep(start = 138, ticks = 27, state = InputState(leftStickY = 1f)),
             MacroStep(
-                start = 184, ticks = 70,
+                start = 209, ticks = 70,
                 state = InputState(buttonA = true),
                 mode = PressMode.TURBO, burstTicks = 4, gapTicks = 3
             ),
-            MacroStep(start = 290, ticks = 27, state = InputState(leftStickY = 1f)),
+            MacroStep(start = 315, ticks = 27, state = InputState(leftStickY = 1f)),
             MacroStep(
-                start = 336, ticks = 70,
+                start = 361, ticks = 70,
                 state = InputState(buttonA = true),
                 mode = PressMode.TURBO, burstTicks = 4, gapTicks = 3
             )
