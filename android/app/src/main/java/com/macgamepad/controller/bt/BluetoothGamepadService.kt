@@ -81,6 +81,9 @@ class BluetoothGamepadService(private val context: Context) {
     private val executor = Executors.newSingleThreadExecutor()
     private var lastSendErrorLogMs = 0L
 
+    /** Used only to give a lying registerApp() a moment to be contradicted. */
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+
     // ================================================================
     // HID Device callback
     // ================================================================
@@ -89,6 +92,7 @@ class BluetoothGamepadService(private val context: Context) {
         override fun onAppStatusChanged(pluggedDevice: BluetoothDevice?, registered: Boolean) {
             Log.d(TAG, "App status changed: registered=$registered, device=${pluggedDevice?.name}")
             if (registered) {
+                _errorMessage.value = null
                 _connectionState.value = ConnectionState.REGISTERED_WAITING
                 Log.i(TAG, "✅ HID Device app registered. Waiting for host connection...")
             } else {
@@ -410,9 +414,21 @@ class BluetoothGamepadService(private val context: Context) {
         if (result) {
             Log.i(TAG, "✅ registerApp() succeeded — waiting for callback...")
         } else {
-            _errorMessage.value = "注册 HID 应用失败，此设备可能不支持蓝牙 HID 设备配置文件"
-            _connectionState.value = ConnectionState.ERROR
-            Log.e(TAG, "❌ registerApp() returned false")
+            // Several ROMs (Flyme, MIUI, EMUI…) return false here while their stack
+            // still registers the app a few milliseconds later — the callback is the
+            // only trustworthy source, so don't shout "unsupported" until it stays
+            // quiet for a beat.
+            Log.w(TAG, "⚠️ registerApp() returned false — waiting for the callback to settle")
+            mainHandler.postDelayed({
+                if (_connectionState.value == ConnectionState.REGISTERING) {
+                    _errorMessage.value =
+                        "系统没有响应 HID 注册，这个型号可能关闭了蓝牙手柄模式"
+                    _connectionState.value = ConnectionState.ERROR
+                    Log.e(TAG, "❌ HID registration never completed")
+                } else {
+                    Log.i(TAG, "✅ Callback beat registerApp()'s false — HID is actually up")
+                }
+            }, 1500)
         }
     }
 }
