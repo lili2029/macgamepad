@@ -19,6 +19,8 @@ import com.macgamepad.controller.R
 import com.macgamepad.controller.input.InputState
 import com.macgamepad.controller.input.Macro
 import com.macgamepad.controller.input.MacroPlayer
+import com.macgamepad.controller.input.MacroRecorder
+import com.macgamepad.controller.input.MacroStep
 import com.macgamepad.controller.input.withMacroOverlay
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,6 +81,18 @@ class GamepadService : Service(), SensorEventListener {
      * [MacroPlayer.advance] is only ever called from the 125 Hz loop.
      */
     private val macroPlayer = MacroPlayer()
+
+    /**
+     * Samples what the host is being told, one tick at a time, so a macro can be
+     * built by playing it instead of by hand. Owned by the same loop as [macroPlayer].
+     */
+    private val macroRecorder = MacroRecorder()
+
+    private val _recordingStats = MutableStateFlow(MacroRecorder.Stats())
+    val recordingStats: StateFlow<MacroRecorder.Stats> = _recordingStats.asStateFlow()
+
+    /** Republished to the UI only every ~200 ms; a 125 Hz StateFlow would thrash compose. */
+    private var recordTickCount = 0
 
     inner class LocalBinder : Binder() {
         fun getService(): GamepadService = this@GamepadService
@@ -232,6 +246,67 @@ class GamepadService : Service(), SensorEventListener {
         }
     }
 
+    // ================================================================
+    // Recording
+    //
+    // Capture is fed from the transmission loop, i.e. from the frames that were
+    // actually sent, so a recorded macro replays what the game really saw — not
+    // what the UI thinks it should have seen. Nothing is sent any differently
+    // while recording; the player keeps full control of the pad.
+    // ================================================================
+
+    fun startRecording(): Boolean {
+        if (_mode.value != Mode.GAMEPAD) {
+            Log.i(TAG, "Recording ignored: keyboard mode")
+            return false
+        }
+        if (btService.connectionState.value != BluetoothGamepadService.ConnectionState.CONNECTED) {
+            Log.i(TAG, "Recording ignored: not connected")
+            return false
+        }
+        // A macro playing back while recording would bake the overlay into the new
+        // macro, which is never what the player meant.
+        cancelMacro()
+        macroRecorder.start()
+        recordTickCount = 0
+        _recordingStats.value = MacroRecorder.Stats(recording = true)
+        Log.i(TAG, "Recording started")
+        return true
+    }
+
+    /** Ends the recording and hands back its steps; the caller decides the name. */
+    fun stopRecording(): List<MacroStep> {
+        val steps = macroRecorder.stop()
+        recordTickCount = 0
+        _recordingStats.value = MacroRecorder.Stats()
+        Log.i(TAG, "Recording stopped: ${steps.size} steps, ${steps.sumOf { it.ticks }} ticks")
+        return steps
+    }
+
+    fun cancelRecording() {
+        if (macroRecorder.isRecording) Log.i(TAG, "Recording discarded")
+        macroRecorder.cancel()
+        recordTickCount = 0
+        _recordingStats.value = MacroRecorder.Stats()
+    }
+
+    val isRecording: Boolean get() = macroRecorder.isRecording
+
+    /**
+     * Called once per loop iteration, after the report went out, so the sample is
+     * the exact state the host just received.
+     */
+    private fun captureRecordingTick() {
+        macroRecorder.capture(lastSentState ?: currentInputState)
+        recordTickCount++
+        val stats = macroRecorder.stats()
+        // ~5 updates a second is plenty for a pill that shows tenths of a second,
+        // and it keeps the 125 Hz loop from flooding compose with recompositions.
+        if (recordTickCount % 25 == 0 || stats.saturated) {
+            _recordingStats.value = stats
+        }
+    }
+
     /**
      * The single place a gamepad report leaves the phone. Applies the macro overlay
      * if one is running, so the live input path and the 125 Hz loop can never
@@ -373,6 +448,10 @@ class GamepadService : Service(), SensorEventListener {
                             }
                         }
                     }
+
+                    // Sample after the report went out: what the host received is
+                    // what a later replay has to reproduce.
+                    if (macroRecorder.isRecording) captureRecordingTick()
                 }
                 delay(REPORT_INTERVAL_MS)
             }
@@ -384,6 +463,11 @@ class GamepadService : Service(), SensorEventListener {
         serviceJob = null
         // Never leave a macro half-played: the next session starts from a clean slate.
         macroPlayer.cancel()
+        // A recording belongs to the session it was started in.
+        if (macroRecorder.isRecording) {
+            macroRecorder.cancel()
+            _recordingStats.value = MacroRecorder.Stats()
+        }
         unregisterGyroListener()
     }
 

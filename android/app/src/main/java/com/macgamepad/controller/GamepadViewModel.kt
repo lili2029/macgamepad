@@ -10,8 +10,12 @@ import com.macgamepad.controller.bt.GamepadService
 import com.macgamepad.controller.input.InputState
 import com.macgamepad.controller.input.Macro
 import com.macgamepad.controller.input.MacroLibrary
+import com.macgamepad.controller.input.MacroRecorder
 import com.macgamepad.controller.input.MacroStore
 import com.macgamepad.controller.input.sanitized
+import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -139,6 +143,10 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
 
     fun setService(service: GamepadService?) {
         _gamepadService.value = service
+        recordingJob?.cancel()
+        recordingJob = null
+        _isRecording.value = false
+        _recordingStats.value = MacroRecorder.Stats()
         if (service != null) {
             Log.i(TAG, "Service reference acquired by ViewModel")
             _connectionState.value = service.btService.connectionState.value
@@ -154,6 +162,26 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
 
             service.updatePreferences(_sensitivity.value, _deadZone.value, _gyroEnabled.value)
             updateTargetDeviceName()
+            observeRecording(service)
+        }
+    }
+
+    /**
+     * Mirrors the service's recording stats into the UI state. The 12 s budget
+     * hitting its cap is handled here rather than in the service so that saving a
+     * take has exactly one code path.
+     */
+    private fun observeRecording(service: GamepadService) {
+        recordingJob?.cancel()
+        recordingJob = viewModelScope.launch {
+            service.recordingStats.collect { stats ->
+                _recordingStats.value = stats
+                _isRecording.value = stats.recording
+                if (stats.recording && stats.saturated) {
+                    Log.i(TAG, "Recording hit its limit, saving what we have")
+                    finishRecording()
+                }
+            }
         }
     }
 
@@ -250,7 +278,12 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    fun navigateToDashboard() { _currentScreen.value = Screen.DASHBOARD }
+    fun navigateToDashboard() {
+        // Walking away mid-take saves it rather than throwing it away: the player
+        // can review it from the macro list, and nothing is silently lost.
+        if (_isRecording.value) finishRecording()
+        _currentScreen.value = Screen.DASHBOARD
+    }
     fun navigateToProfile()   { _currentScreen.value = Screen.PROFILE   }
     fun navigateToSettings()  { _currentScreen.value = Screen.SETTINGS  }
 
@@ -491,6 +524,73 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         _gamepadService.value?.cancelMacro()
     }
 
+    // ================================================================
+    // Recording
+    //
+    // The service samples the outgoing reports; this side only turns the result
+    // into a saved macro. Recording never sends anything extra to the host, so the
+    // game behaves exactly as if the player were just playing.
+    // ================================================================
+
+    private val _isRecording = MutableStateFlow(false)
+    val isRecording: StateFlow<Boolean> = _isRecording.asStateFlow()
+
+    private val _recordingStats = MutableStateFlow(MacroRecorder.Stats())
+    val recordingStats: StateFlow<MacroRecorder.Stats> = _recordingStats.asStateFlow()
+
+    private var recordingJob: Job? = null
+
+    /** Starts capturing the on-screen controls. The macro button turns into Stop. */
+    fun startRecording() {
+        val service = _gamepadService.value
+        if (service == null) {
+            Log.i(TAG, "Recording ignored: no service")
+            return
+        }
+        if (!service.startRecording()) {
+            Log.i(TAG, "Recording ignored: connect a host in gamepad mode first")
+            return
+        }
+        _recordingStats.value = MacroRecorder.Stats(recording = true)
+        _isRecording.value = true
+    }
+
+    /**
+     * Saves the take and selects it, so the macro button fires it right away.
+     * Safe to call twice: the service only has a recording while one is running.
+     */
+    fun finishRecording() {
+        val service = _gamepadService.value ?: return
+        if (!_isRecording.value) return
+        val steps = service.stopRecording()
+        _isRecording.value = false
+        _recordingStats.value = MacroRecorder.Stats()
+        if (steps.isEmpty()) {
+            Log.i(TAG, "Recording dropped: nothing was pressed")
+            return
+        }
+        val fresh = macroStore.newMacro(_macros.value)
+        val recorded = fresh.copy(name = nextRecordingName(), steps = steps, cooldownTicks = 4).sanitized()
+        _macros.value = macroStore.save(recorded)
+        setSelectedMacro(recorded.id)
+        Log.i(TAG, "Recording saved: ${recorded.id} \"${recorded.name}\", ${recorded.steps.size} steps, ${recorded.durationMs} ms")
+    }
+
+    /** Throws the take away. */
+    fun discardRecording() {
+        _gamepadService.value?.cancelRecording()
+        _isRecording.value = false
+        _recordingStats.value = MacroRecorder.Stats()
+        Log.i(TAG, "Recording discarded")
+    }
+
+    private fun nextRecordingName(): String {
+        val used = _macros.value.map { it.name }.toSet()
+        var n = 1
+        while ("录制 $n" in used) n++
+        return "录制 $n"
+    }
+
     /** Fires an unsaved draft straight from the editor, so timing can be felt out. */
     fun previewMacro(macro: Macro) {
         _gamepadService.value?.triggerMacro(macro.sanitized())
@@ -533,6 +633,8 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         // Leaving the pad screen drops whatever was being held; without this a
         // stick pushed at the moment of the tap would stay pushed on the Mac.
         _gamepadService.value?.cancelMacro()
+        // A take still running belongs to the pad screen; the editor can't show it.
+        if (_isRecording.value) discardRecording()
         _gamepadService.value?.updateInputState(InputState())
         val target = if (macroId == null) {
             val fresh = macroStore.newMacro(_macros.value)

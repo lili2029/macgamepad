@@ -1,7 +1,7 @@
 package com.macgamepad.controller.input
 
 /**
- * A macro is a timed sequence of ordinary controller states replayed by the phone.
+ * A macro is a timeline of ordinary controller presses replayed by the phone.
  *
  * The Mac never learns that a macro exists: the HID report descriptor, the report
  * length and the button bitmap are all untouched. A macro only decides which of the
@@ -9,19 +9,35 @@ package com.macgamepad.controller.input
  * costs nothing on the host side (no repair, no rebinding, works with Switch, Xbox
  * and DualSense profiles alike).
  *
- * A step's [state] is an *overlay*, not a full frame: fields left at their defaults
- * mean "don't press this", and whatever the player is physically holding is kept
- * (see [withMacroOverlay]).
+ * The timeline model is what makes "hold ZL, tap X half-way through, then tap A"
+ * expressible at all: each [MacroStep] is an independent press that occupies a
+ * window on the clock, so several of them can be live at the same time. Two steps
+ * whose windows overlap are simply merged into one report (see [Macro.overlayAt]),
+ * which is also how a chord such as Y+B ends up in a single frame.
+ *
+ * Steps are *overlays*, not full frames: fields left at their defaults mean "this
+ * press does not touch that control", and whatever the player is physically doing
+ * is kept (see [withMacroOverlay]).
  */
 data class MacroStep(
-    /** How long this step lasts, in 8 ms ticks. 2 ticks = 16 ms is the practical floor. */
-    val ticks: Int,
-    val state: InputState = InputState(),
-    val label: String = ""
-)
+    /** When this press starts, in 8 ms ticks from the beginning of the macro. */
+    val start: Int = 0,
+    /** How long it is held, in ticks. 2 ticks = 16 ms is the practical floor. */
+    val ticks: Int = 2,
+    val state: InputState = InputState()
+) {
+    /** One past the last tick this press is live on. */
+    val end: Int get() = start + ticks
+
+    /** "ZL+A" style caption, derived rather than typed. */
+    val caption: String get() = MacroKeys.summary(state)
+
+    val isEmpty: Boolean get() = MacroKeys.isEmpty(state)
+}
 
 /**
- * @param steps replayed in order; a step with an empty state is a deliberate gap.
+ * @param steps the presses; several may overlap, and gaps between them are just
+ *        clock time with nothing pressed — no filler steps needed.
  * @param cooldownTicks trailing frames sent with nothing pressed, so a report that
  *        arrives out of order can never leave a button stuck down.
  */
@@ -32,19 +48,80 @@ data class Macro(
     val cooldownTicks: Int = 4
 ) {
     init {
-        require(steps.isNotEmpty()) { "a macro needs at least one step" }
-        require(steps.all { it.ticks > 0 }) { "every step must last at least one tick" }
+        require(steps.isNotEmpty()) { "a macro needs at least one press" }
+        require(steps.all { it.start >= 0 && it.ticks > 0 }) { "every press needs a start and a length" }
     }
 
-    val totalTicks: Int = steps.sumOf { it.ticks }
+    /** Length of the timeline, i.e. the end of the last press. */
+    val totalTicks: Int = steps.maxOf { it.end }
 
     /** Total wall-clock length, for the UI. */
     val durationMs: Int get() = (totalTicks + cooldownTicks) * TICK_MS
+
+    /** Steps in timeline order, which is also the order the editor lists them in. */
+    val ordered: List<MacroStep> get() = steps.sortedWith(compareBy({ it.start }, { it.end }))
+
+    /** True when two presses are live on the same tick, i.e. a chord or a hold. */
+    val hasOverlap: Boolean
+        get() {
+            val sorted = ordered
+            for (i in sorted.indices) {
+                for (j in i + 1 until sorted.size) {
+                    if (sorted[j].start >= sorted[i].end) break
+                    if (sorted[j].start < sorted[i].end && sorted[j].end > sorted[i].start) return true
+                }
+            }
+            return false
+        }
+
+    /** The report the macro asks for on [tick]: every press live at that moment, merged. */
+    fun overlayAt(tick: Int): InputState {
+        var merged = InputState()
+        for (step in steps) {
+            if (tick >= step.start && tick < step.end) merged = merged.union(step.state)
+        }
+        return merged
+    }
 
     companion object {
         const val TICK_MS = 8
     }
 }
+
+/**
+ * Merges two live presses into one report: buttons are OR-ed, triggers take the
+ * stronger value, and axes add up (so "up + right" works) before clamping.
+ */
+fun InputState.union(other: InputState): InputState = copy(
+    leftStickX = (leftStickX + other.leftStickX).coerceIn(-1f, 1f),
+    leftStickY = (leftStickY + other.leftStickY).coerceIn(-1f, 1f),
+    rightStickX = (rightStickX + other.rightStickX).coerceIn(-1f, 1f),
+    rightStickY = (rightStickY + other.rightStickY).coerceIn(-1f, 1f),
+
+    dpadUp = dpadUp || other.dpadUp,
+    dpadDown = dpadDown || other.dpadDown,
+    dpadLeft = dpadLeft || other.dpadLeft,
+    dpadRight = dpadRight || other.dpadRight,
+
+    buttonA = buttonA || other.buttonA,
+    buttonB = buttonB || other.buttonB,
+    buttonX = buttonX || other.buttonX,
+    buttonY = buttonY || other.buttonY,
+
+    buttonL1 = buttonL1 || other.buttonL1,
+    buttonR1 = buttonR1 || other.buttonR1,
+
+    leftTrigger = maxOf(leftTrigger, other.leftTrigger),
+    rightTrigger = maxOf(rightTrigger, other.rightTrigger),
+
+    buttonL3 = buttonL3 || other.buttonL3,
+    buttonR3 = buttonR3 || other.buttonR3,
+
+    buttonStart = buttonStart || other.buttonStart,
+    buttonSelect = buttonSelect || other.buttonSelect,
+    buttonHome = buttonHome || other.buttonHome,
+    buttonCapture = buttonCapture || other.buttonCapture
+)
 
 /**
  * Drives a [Macro] one tick at a time.
@@ -78,18 +155,10 @@ class MacroPlayer {
 
     /**
      * The overlay for the tick being transmitted right now, or null when idle.
-     * After the last step the cooldown frames are empty overlays, i.e. "nothing
+     * After the last press the cooldown frames are empty overlays, i.e. "nothing
      * pressed", which is what releases the buttons.
      */
-    fun currentFrame(): InputState? {
-        val m = macro ?: return null
-        var start = 0
-        for (step in m.steps) {
-            if (tick < start + step.ticks) return step.state
-            start += step.ticks
-        }
-        return InputState()
-    }
+    fun currentFrame(): InputState? = macro?.overlayAt(tick)
 
     /** Advance one tick. Returns false once the macro (and its cooldown) is over. */
     fun advance(): Boolean {
@@ -146,28 +215,42 @@ fun InputState.withMacroOverlay(overlay: InputState): InputState = copy(
  * The built-in macros. Add one here and it becomes selectable by id; the on-screen
  * macro button fires whichever the `macro_selected` preference names.
  *
- * Step lengths are in 8 ms ticks. Giving every press at least 2 ticks and putting
- * a 2-tick gap between repeats is what keeps a game from swallowing an input —
- * Tears of the Kingdom in particular reads a press shorter than ~16 ms as noise.
+ * Step lengths are in 8 ms ticks and positions are absolute. Giving every press at
+ * least 2 ticks and leaving 2 ticks between repeats is what keeps a game from
+ * swallowing an input — Tears of the Kingdom in particular reads a press shorter
+ * than ~16 ms as noise.
  */
 object MacroLibrary {
 
     const val DEFAULT_ID = "zl_a_combo"
 
-    /** Hold ZL, tap A three times, release — one thumb, one button. */
+    /**
+     * One long ZL hold with three A taps inside it: the whole point of the timeline
+     * model, since repeating ZL in every frame would be both longer and unreadable.
+     */
     val zlACombo = Macro(
         id = "zl_a_combo",
-        name = "ZL + A 三连",
+        name = "ZL 长按 + A×3",
         steps = listOf(
-            MacroStep(2),                                                   // settle
-            MacroStep(4, InputState(leftTrigger = 1f), "按下 ZL"),
-            MacroStep(3, InputState(leftTrigger = 1f, buttonA = true), "A"),
-            MacroStep(2, InputState(leftTrigger = 1f)),
-            MacroStep(3, InputState(leftTrigger = 1f, buttonA = true), "A"),
-            MacroStep(2, InputState(leftTrigger = 1f)),
-            MacroStep(3, InputState(leftTrigger = 1f, buttonA = true), "A"),
-            MacroStep(4, InputState(leftTrigger = 1f), "松开 ZL"),
-            MacroStep(2)
+            MacroStep(start = 0, ticks = 40, state = InputState(leftTrigger = 1f)),
+            MacroStep(start = 6, ticks = 3, state = InputState(buttonA = true)),
+            MacroStep(start = 14, ticks = 3, state = InputState(buttonA = true)),
+            MacroStep(start = 22, ticks = 3, state = InputState(buttonA = true))
+        )
+    )
+
+    /**
+     * The exact shape the editor was built around: hold ZL, press X while it is
+     * still down, then A. Each press keeps its own window, so the overlap is what
+     * the game sees.
+     */
+    val zlHoldXThenA = Macro(
+        id = "zl_x_a",
+        name = "ZL 长按 + X → A",
+        steps = listOf(
+            MacroStep(start = 0, ticks = 32, state = InputState(leftTrigger = 1f)),
+            MacroStep(start = 6, ticks = 4, state = InputState(buttonX = true)),
+            MacroStep(start = 18, ticks = 4, state = InputState(buttonA = true))
         )
     )
 
@@ -184,9 +267,7 @@ object MacroLibrary {
         id = "yb_dupe",
         name = "YB 复制",
         steps = listOf(
-            MacroStep(2),                                                          // settle
-            MacroStep(2, InputState(buttonY = true, buttonB = true), "Y+B"),        // one frame, both bits
-            MacroStep(2)                                                           // release
+            MacroStep(start = 2, ticks = 2, state = InputState(buttonY = true, buttonB = true))
         )
     )
 
@@ -194,12 +275,8 @@ object MacroLibrary {
     val mashA = Macro(
         id = "mash_a",
         name = "连发 A ×5",
-        steps = buildList {
-            repeat(5) {
-                add(MacroStep(2, InputState(buttonA = true), "A"))
-                add(MacroStep(2))
-            }
-            add(MacroStep(2))
+        steps = List(5) { i ->
+            MacroStep(start = i * 4, ticks = 2, state = InputState(buttonA = true))
         }
     )
 
@@ -208,15 +285,12 @@ object MacroLibrary {
         id = "b_into_x",
         name = "B → X 连招",
         steps = listOf(
-            MacroStep(2),
-            MacroStep(3, InputState(buttonB = true), "B"),
-            MacroStep(1),
-            MacroStep(3, InputState(buttonX = true), "X"),
-            MacroStep(3)
+            MacroStep(start = 0, ticks = 3, state = InputState(buttonB = true)),
+            MacroStep(start = 4, ticks = 3, state = InputState(buttonX = true))
         )
     )
 
-    val all: List<Macro> = listOf(zlACombo, ybDupe, mashA, bIntoX)
+    val all: List<Macro> = listOf(zlACombo, zlHoldXThenA, ybDupe, mashA, bIntoX)
 
     /** Factory versions, before any user edit. [MacroStore] layers overrides on top. */
     val defaults: List<Macro> get() = all

@@ -1,5 +1,6 @@
 package com.macgamepad.controller.ui.screens
 
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,8 +13,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBackIosNew
-import androidx.compose.material.icons.filled.ArrowDownward
-import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
@@ -26,6 +25,9 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
@@ -39,6 +41,7 @@ import com.macgamepad.controller.input.Macro
 import com.macgamepad.controller.input.MacroKeys
 import com.macgamepad.controller.input.MacroLibrary
 import com.macgamepad.controller.input.MacroStep
+import com.macgamepad.controller.input.MacroStore
 import com.macgamepad.controller.input.sanitized
 import com.macgamepad.controller.ui.theme.*
 import kotlinx.coroutines.delay
@@ -46,10 +49,13 @@ import kotlinx.coroutines.delay
 /**
  * Macro editor.
  *
- * A macro is nothing but an ordered list of "hold these buttons for N ticks"
- * frames, so editing it needs no new HID concepts: the user picks keys from the
- * palette on the pad they already have, sets how long each frame lasts, and the
- * on-screen macro button replays it. Everything here is a draft until Save.
+ * A macro is a timeline, not a tape: every row on this screen is one *press* that
+ * owns a window on the clock — when it goes down and how long it stays down. Two
+ * windows that overlap are one report on the phone, which is exactly how "hold ZL,
+ * press X while it is still down, then A" is built: one long ZL bar with the X and
+ * A bars sitting inside it.
+ *
+ * Everything here is a draft until Save; the pad keeps firing whatever was saved.
  */
 @Composable
 fun MacroEditorScreen(
@@ -64,7 +70,9 @@ fun MacroEditorScreen(
     modifier: Modifier = Modifier
 ) {
     var name by remember(macro.id) { mutableStateOf(macro.name) }
-    var steps by remember(macro.id) { mutableStateOf(macro.steps) }
+    var steps by remember(macro.id) {
+        mutableStateOf(macro.steps.sortedWith(compareBy({ it.start }, { it.end })))
+    }
     var cooldown by remember(macro.id) { mutableStateOf(macro.cooldownTicks) }
     var pickerIndex by remember { mutableStateOf(-1) }
     var showDelete by remember { mutableStateOf(false) }
@@ -92,20 +100,28 @@ fun MacroEditorScreen(
         cooldownTicks = cooldown
     )
 
-    fun updateStep(index: Int, transform: (MacroStep) -> MacroStep) {
+    /**
+     * Rows are kept sorted so the list, the timeline strip and the stored macro all
+     * agree on the order. Dragging a slider passes [sort] = false so the row does
+     * not jump out from under the finger; letting go re-sorts.
+     */
+    fun applySteps(next: List<MacroStep>, sort: Boolean = true) {
+        steps = if (sort) next.sortedWith(compareBy({ it.start }, { it.end })) else next
+    }
+
+    fun updateStep(index: Int, sort: Boolean = false, transform: (MacroStep) -> MacroStep) {
         if (index !in steps.indices) return
         val list = steps.toMutableList()
         list[index] = transform(list[index])
-        steps = list
+        applySteps(list, sort)
     }
 
-    fun moveStep(index: Int, delta: Int) {
-        val target = index + delta
-        if (index !in steps.indices || target !in steps.indices) return
-        val list = steps.toMutableList()
-        val item = list.removeAt(index)
-        list.add(target, item)
-        steps = list
+    val maxEnd = draft.totalTicks
+    // Upper end of the "when does this press start" slider. It only ever grows, so
+    // dragging a long hold later cannot rescale the thumb under the finger.
+    var startRange by remember(macro.id) { mutableStateOf(maxOf(maxEnd + 12, 32)) }
+    LaunchedEffect(maxEnd) {
+        if (maxEnd + 12 > startRange) startRange = maxEnd + 12
     }
 
     Column(
@@ -207,15 +223,42 @@ fun MacroEditorScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                StatPill("步数", "${steps.size}")
+                StatPill("按压", "${steps.size} 段")
                 StatPill("总长", "${draft.durationMs} ms")
                 StatPill("收尾", "${cooldown * Macro.TICK_MS} ms")
+                if (draft.hasOverlap) StatPill("重叠", "有同时按下")
+            }
+
+            // ── Timeline strip ──────────────────────────────────────────────
+            MacroTimeline(
+                steps = steps,
+                totalTicks = draft.totalTicks,
+                selected = pickerIndex,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(88.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(Bg2)
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
+                    .padding(8.dp)
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("0 ms", fontSize = 9.sp, color = TextTertiary)
+                Text(
+                    "一行 = 一段按压 · 上下重叠就是同时按住",
+                    fontSize = 9.sp,
+                    color = TextTertiary
+                )
+                Text("${draft.durationMs} ms", fontSize = 9.sp, color = TextTertiary)
             }
         }
 
         HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
 
-        // ── Steps ───────────────────────────────────────────────────────────
+        // ── Presses ─────────────────────────────────────────────────────────
         LazyColumn(
             modifier = Modifier
                 .weight(1f)
@@ -225,7 +268,7 @@ fun MacroEditorScreen(
         ) {
             item {
                 Text(
-                    "每一步就是发送给 Mac 的一帧：按住这些键 ${Macro.TICK_MS} ms 的整数倍。两步之间空一帧延时可以避免游戏吞输入。",
+                    "每段按压有自己的起点和时长：把 ZL 拉长到 200 ms，再把 X 的起点拖到 48 ms，就是「按住 ZL 的同时按 X」。重叠的几段在手机端合并成同一帧发送。",
                     fontSize = 10.sp,
                     color = TextTertiary,
                     lineHeight = 15.sp,
@@ -234,25 +277,50 @@ fun MacroEditorScreen(
             }
 
             itemsIndexed(steps, key = { index, _ -> index }) { index, step ->
-                StepRow(
+                PressRow(
                     index = index,
                     step = step,
-                    isFirst = index == 0,
-                    isLast = index == steps.lastIndex,
+                    startRange = startRange,
                     canDelete = steps.size > 1,
                     onOpenPicker = { pickerIndex = index },
-                    onTicks = { value -> updateStep(index) { it.copy(ticks = value.coerceIn(1, 250)) } },
-                    onMoveUp = { moveStep(index, -1) },
-                    onMoveDown = { moveStep(index, 1) },
+                    onStart = { value ->
+                        updateStep(index, sort = false) { it.copy(start = value.coerceIn(0, MacroStore.MAX_START)) }
+                    },
+                    onStartDone = { applySteps(steps) },
+                    onTicks = { value ->
+                        updateStep(index) { it.copy(ticks = value.coerceIn(1, 250)) }
+                    },
                     onDuplicate = {
                         if (steps.size < 80) {
                             val list = steps.toMutableList()
+                            list.add(index + 1, step.copy(start = step.end))
+                            applySteps(list)
+                        }
+                    },
+                    onStartTogether = {
+                        if (steps.size < 80) {
+                            val list = steps.toMutableList()
                             list.add(index + 1, step)
-                            steps = list
+                            applySteps(list)
+                        }
+                    },
+                    onInsertInside = {
+                        if (steps.size < 80) {
+                            val at = step.start + step.ticks / 2
+                            val list = steps.toMutableList()
+                            list.add(index + 1, MacroStep(start = at, ticks = 3))
+                            applySteps(list)
+                            pickerIndex = list.indexOfFirst { it.start == at && it.ticks == 3 && it.isEmpty }
+                        }
+                    },
+                    onExtend = {
+                        val next = steps.filter { it.start > step.start }.minByOrNull { it.start }
+                        if (next != null) {
+                            updateStep(index) { it.copy(ticks = (next.start - it.start).coerceAtLeast(1)) }
                         }
                     },
                     onDelete = {
-                        if (steps.size > 1) steps = steps.toMutableList().also { it.removeAt(index) }
+                        if (steps.size > 1) applySteps(steps.toMutableList().also { it.removeAt(index) })
                     }
                 )
             }
@@ -264,10 +332,20 @@ fun MacroEditorScreen(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     AddStepButton("按键", Icons.Default.Add) {
-                        if (steps.size < 80) steps = steps + MacroStep(3, InputState(buttonA = true))
+                        if (steps.size < 80) {
+                            val at = maxEnd
+                            val list = steps + MacroStep(start = at, ticks = 3)
+                            applySteps(list)
+                            pickerIndex = list.indexOfFirst { it.start == at && it.isEmpty }
+                        }
                     }
-                    AddStepButton("延时", Icons.Default.Add) {
-                        if (steps.size < 80) steps = steps + MacroStep(4)
+                    AddStepButton("同时按", Icons.Default.Add) {
+                        if (steps.size < 80) {
+                            val at = steps.firstOrNull()?.start ?: 0
+                            val list = steps + MacroStep(start = at, ticks = 3)
+                            applySteps(list)
+                            pickerIndex = list.indexOfFirst { it.start == at && it.isEmpty }
+                        }
                     }
                     AddStepButton("收尾 +", Icons.Default.Add) {
                         cooldown = (cooldown + 4).coerceAtMost(40)
@@ -326,7 +404,7 @@ fun MacroEditorScreen(
                 if (isBuiltin) {
                     SmallAction("恢复默认", Icons.Default.Refresh, AccentAmber, enabled = canReset) {
                         name = factory.name
-                        steps = factory.steps
+                        steps = factory.steps.sortedWith(compareBy({ it.start }, { it.end }))
                         cooldown = factory.cooldownTicks
                         onReset()
                     }
@@ -337,7 +415,7 @@ fun MacroEditorScreen(
                 }
             }
             Text(
-                "贴士：按键步建议 ≥3 tick（24 ms），短于 16 ms 的按下会被不少游戏当成抖动。",
+                "贴士：短按建议 ≥3 tick（24 ms），短于 16 ms 的按下会被不少游戏当成抖动；两根并存的段不要同时按同一个键。",
                 fontSize = 9.sp,
                 color = TextTertiary,
                 textAlign = TextAlign.Start
@@ -350,6 +428,8 @@ fun MacroEditorScreen(
         val step = steps[pickerIndex]
         KeyPickerDialog(
             state = step.state,
+            start = step.start,
+            ticks = step.ticks,
             onToggle = { key -> updateStep(pickerIndex) { it.copy(state = MacroKeys.toggle(it.state, key)) } },
             onClear = { updateStep(pickerIndex) { it.copy(state = InputState()) } },
             onDone = { pickerIndex = -1 }
@@ -364,7 +444,7 @@ fun MacroEditorScreen(
             title = { Text("删除这个宏？", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp) },
             text = {
                 Text(
-                    "「${macro.name}」的步骤会一并删除，此操作无法撤销。",
+                    "「${macro.name}」的所有按压段会一并删除，此操作无法撤销。",
                     color = TextSecondary,
                     fontSize = 12.sp,
                     lineHeight = 17.sp
@@ -384,107 +464,240 @@ fun MacroEditorScreen(
 }
 
 // ══════════════════════════════════════════════════════════════════════════
-// Step row
+// Timeline strip
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Every press as one bar on a shared clock, one row each. Overlapping rows are the
+ * visual answer to "am I really holding ZL while tapping X?" — if two bars sit on
+ * top of each other, the phone merges them into one report.
+ */
+@Composable
+private fun MacroTimeline(
+    steps: List<MacroStep>,
+    totalTicks: Int,
+    selected: Int,
+    modifier: Modifier = Modifier
+) {
+    val rows = steps.size.coerceAtLeast(1)
+    val span = totalTicks.coerceAtLeast(1)
+
+    Canvas(modifier = modifier) {
+        val rowH = size.height / rows
+        val barH = (rowH * 0.68f).coerceIn(1.5f, 9.dp.toPx())
+        // Nothing on the clock yet: draw the empty rail so the strip still reads as
+        // a timeline rather than a stray line.
+        drawRoundRect(
+            color = BorderSubtle.copy(alpha = 0.5f),
+            topLeft = Offset(0f, size.height / 2f - 0.5.dp.toPx()),
+            size = Size(size.width, 1.dp.toPx()),
+            cornerRadius = CornerRadius(1f)
+        )
+        steps.forEachIndexed { index, step ->
+            val x1 = size.width * step.start / span
+            val x2 = size.width * step.end / span
+            val y = index * rowH + (rowH - barH) / 2f
+            val empty = step.isEmpty
+            val color = when {
+                empty -> BorderSubtle
+                index == selected -> AccentAmber
+                else -> AccentCyan
+            }
+            drawRoundRect(
+                color = color.copy(alpha = if (empty) 0.5f else 0.85f),
+                topLeft = Offset(x1, y),
+                size = Size((x2 - x1).coerceAtLeast(2.dp.toPx()), barH),
+                cornerRadius = CornerRadius(barH / 2f)
+            )
+            // A live hold longer than ~12% of the timeline gets a hatch mark at its
+            // end, so a long bar cannot be mistaken for a row that never stops.
+            if (!empty && step.ticks * 100 / span >= 12) {
+                drawRoundRect(
+                    color = Color.Black.copy(alpha = 0.35f),
+                    topLeft = Offset(x2 - 1.5.dp.toPx(), y),
+                    size = Size(1.5.dp.toPx(), barH),
+                    cornerRadius = CornerRadius(1f)
+                )
+            }
+        }
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Press row
 // ══════════════════════════════════════════════════════════════════════════
 
 @Composable
-private fun StepRow(
+private fun PressRow(
     index: Int,
     step: MacroStep,
-    isFirst: Boolean,
-    isLast: Boolean,
+    startRange: Int,
     canDelete: Boolean,
     onOpenPicker: () -> Unit,
+    onStart: (Int) -> Unit,
+    onStartDone: () -> Unit,
     onTicks: (Int) -> Unit,
-    onMoveUp: () -> Unit,
-    onMoveDown: () -> Unit,
     onDuplicate: () -> Unit,
+    onStartTogether: () -> Unit,
+    onInsertInside: () -> Unit,
+    onExtend: () -> Unit,
     onDelete: () -> Unit
 ) {
     var menuOpen by remember { mutableStateOf(false) }
-    val summary = MacroKeys.summary(step.state)
+    val summary = step.caption
     val accent = if (summary.isEmpty()) TextTertiary else AccentCyan
 
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Bg2)
             .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
-            .clickable { onOpenPicker() }
-            .padding(horizontal = 10.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        Box(
-            modifier = Modifier
-                .size(26.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .background(Bg3)
-                .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)),
-            contentAlignment = Alignment.Center
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text("${index + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
-        }
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = if (summary.isEmpty()) "延时（不按键）" else summary,
-                fontSize = 13.sp,
-                fontWeight = if (summary.isEmpty()) FontWeight.Normal else FontWeight.SemiBold,
-                fontStyle = if (summary.isEmpty()) FontStyle.Italic else FontStyle.Normal,
-                color = accent,
-                maxLines = 2
-            )
-            Spacer(Modifier.height(4.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                StepIconButton(Icons.Default.Remove) { onTicks(step.ticks - 1) }
-                Text(
-                    "${step.ticks} tick · ${step.ticks * Macro.TICK_MS} ms",
-                    fontSize = 10.sp,
-                    color = TextTertiary,
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                )
-                StepIconButton(Icons.Default.Add) { onTicks(step.ticks + 1) }
-            }
-        }
-
-        Box {
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(26.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .clickable { menuOpen = true },
+                    .background(Bg3)
+                    .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Default.MoreVert, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                Text("${index + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
             }
-            DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-                DropdownMenuItem(
-                    text = { Text("上移", fontSize = 12.sp) },
-                    enabled = !isFirst,
-                    leadingIcon = { Icon(Icons.Default.ArrowUpward, null, modifier = Modifier.size(15.dp)) },
-                    onClick = { menuOpen = false; onMoveUp() }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onOpenPicker() }
+                    .padding(vertical = 2.dp)
+            ) {
+                Text(
+                    text = if (summary.isEmpty()) "未设置按键（点击选择）" else summary,
+                    fontSize = 13.sp,
+                    fontWeight = if (summary.isEmpty()) FontWeight.Normal else FontWeight.SemiBold,
+                    fontStyle = if (summary.isEmpty()) FontStyle.Italic else FontStyle.Normal,
+                    color = accent,
+                    maxLines = 2
                 )
-                DropdownMenuItem(
-                    text = { Text("下移", fontSize = 12.sp) },
-                    enabled = !isLast,
-                    leadingIcon = { Icon(Icons.Default.ArrowDownward, null, modifier = Modifier.size(15.dp)) },
-                    onClick = { menuOpen = false; onMoveDown() }
+                Text(
+                    "${step.start * Macro.TICK_MS} → ${step.end * Macro.TICK_MS} ms · 共 ${step.ticks * Macro.TICK_MS} ms",
+                    fontSize = 9.sp,
+                    color = TextTertiary
                 )
-                DropdownMenuItem(
-                    text = { Text("复制这一步", fontSize = 12.sp) },
-                    leadingIcon = { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(15.dp)) },
-                    onClick = { menuOpen = false; onDuplicate() }
-                )
-                DropdownMenuItem(
-                    text = { Text("删除这一步", fontSize = 12.sp, color = AccentRed) },
-                    enabled = canDelete,
-                    leadingIcon = { Icon(Icons.Default.Delete, null, tint = AccentRed, modifier = Modifier.size(15.dp)) },
-                    onClick = { menuOpen = false; onDelete() }
-                )
+            }
+
+            Box {
+                Box(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { menuOpen = true },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(Icons.Default.MoreVert, null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                }
+                DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                    DropdownMenuItem(
+                        text = { Text("复制一段（接在后面）", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(15.dp)) },
+                        onClick = { menuOpen = false; onDuplicate() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("同时按（同一起点）", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Default.ContentCopy, null, modifier = Modifier.size(15.dp)) },
+                        onClick = { menuOpen = false; onStartTogether() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("在这段中间插入按键", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Default.Add, null, modifier = Modifier.size(15.dp)) },
+                        onClick = { menuOpen = false; onInsertInside() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("延长到下一段开始", fontSize = 12.sp) },
+                        leadingIcon = { Icon(Icons.Default.Add, null, modifier = Modifier.size(15.dp)) },
+                        onClick = { menuOpen = false; onExtend() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("删除这一段的按键", fontSize = 12.sp, color = AccentRed) },
+                        enabled = canDelete,
+                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = AccentRed, modifier = Modifier.size(15.dp)) },
+                        onClick = { menuOpen = false; onDelete() }
+                    )
+                }
             }
         }
+
+        TimeBar(
+            label = "起点",
+            ticks = step.start,
+            maxTicks = startRange,
+            onChange = onStart,
+            onChangeFinished = onStartDone,
+            tint = AccentAmber
+        )
+        TimeBar(
+            label = "时长",
+            ticks = step.ticks,
+            maxTicks = 200,
+            onChange = onTicks,
+            onChangeFinished = {},
+            tint = AccentCyan
+        )
+    }
+}
+
+/**
+ * Label + slider + numeric readout + ±1 tick. The slider is for the coarse move
+ * (dragging a hold from 24 ms to 400 ms), the buttons are for the single tick that
+ * decides whether a game registers the press at all.
+ */
+@Composable
+private fun TimeBar(
+    label: String,
+    ticks: Int,
+    maxTicks: Int,
+    onChange: (Int) -> Unit,
+    onChangeFinished: () -> Unit,
+    tint: Color
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(label, fontSize = 9.sp, color = TextTertiary, modifier = Modifier.width(22.dp))
+        Slider(
+            value = ticks.coerceIn(0, maxTicks).toFloat(),
+            onValueChange = { onChange(it.toInt()) },
+            onValueChangeFinished = onChangeFinished,
+            valueRange = 0f..maxTicks.toFloat(),
+            colors = SliderDefaults.colors(
+                thumbColor = tint,
+                activeTrackColor = tint.copy(alpha = 0.65f),
+                inactiveTrackColor = Bg3
+            ),
+            modifier = Modifier
+                .weight(1f)
+                .height(22.dp)
+        )
+        Text(
+            "${ticks * Macro.TICK_MS} ms",
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Medium,
+            color = TextSecondary,
+            modifier = Modifier.width(46.dp),
+            textAlign = TextAlign.End
+        )
+        StepIconButton(Icons.Default.Remove) { onChange(ticks - 1) }
+        StepIconButton(Icons.Default.Add) { onChange(ticks + 1) }
     }
 }
 
@@ -495,6 +708,8 @@ private fun StepRow(
 @Composable
 private fun KeyPickerDialog(
     state: InputState,
+    start: Int,
+    ticks: Int,
     onToggle: (String) -> Unit,
     onClear: () -> Unit,
     onDone: () -> Unit
@@ -505,9 +720,9 @@ private fun KeyPickerDialog(
         tonalElevation = 0.dp,
         title = {
             Column {
-                Text("这一帧按哪些键", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
+                Text("这一段按哪些键", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
                 Text(
-                    "可以多选，也可以只按方向或摇杆",
+                    "${start * Macro.TICK_MS} ms 起，按住 ${ticks * Macro.TICK_MS} ms · 可以多选",
                     fontSize = 10.sp,
                     color = TextTertiary,
                     modifier = Modifier.padding(top = 2.dp)

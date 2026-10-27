@@ -39,6 +39,7 @@ import com.macgamepad.controller.input.Macro
 import com.macgamepad.controller.ui.components.*
 import com.macgamepad.controller.ui.theme.*
 import kotlinx.coroutines.delay
+import java.util.Locale
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -171,7 +172,14 @@ fun GamepadScreen(
     macros: List<Macro> = emptyList(),
     selectedMacroId: String? = null,
     onMacroSelected: (String) -> Unit = {},
-    onEditMacro: (String?) -> Unit = {}
+    onEditMacro: (String?) -> Unit = {},
+    // Recording: the macro button doubles as the stop button while a take is running.
+    isRecording: Boolean = false,
+    recordingMs: Int = 0,
+    recordingSteps: Int = 0,
+    onStartRecording: () -> Unit = {},
+    onStopRecording: () -> Unit = {},
+    onDiscardRecording: () -> Unit = {}
 ) {
     var showMacroPicker by remember { mutableStateOf(false) }
     var inputState by remember { mutableStateOf(InputState()) }
@@ -708,35 +716,43 @@ fun GamepadScreen(
                     firing = false
                 }
             }
+            // Recording borrows the button: red, showing the elapsed time, tap = stop.
+            val lit = if (isRecording) Color(0xFFE0453F) else skin.accent
             Box(
                 modifier = Modifier
                     .size(108.dp, 38.dp)
                     .clip(RoundedCornerShape(19.dp))
                     .background(
-                        if (firing) {
-                            Brush.linearGradient(listOf(skin.accent, skin.accent.copy(alpha = 0.55f)))
+                        if (firing || isRecording) {
+                            Brush.linearGradient(listOf(lit, lit.copy(alpha = 0.55f)))
                         } else {
                             Brush.linearGradient(listOf(Color(0xFF16203A), Color(0xFF0A0F1E)))
                         }
                     )
                     .border(
                         1.dp,
-                        skin.accent.copy(alpha = if (firing) 0.95f else 0.35f),
+                        lit.copy(alpha = if (firing || isRecording) 0.95f else 0.35f),
                         RoundedCornerShape(19.dp)
                     )
-                    .pointerInput(isEditMode) {
+                    .pointerInput(isEditMode, isRecording) {
                         if (!isEditMode) {
                             detectTapGestures(
                                 onTap = {
-                                    firing = true
-                                    onMacroTriggered()
+                                    if (isRecording) {
+                                        onStopRecording()
+                                    } else {
+                                        firing = true
+                                        onMacroTriggered()
+                                    }
                                 },
                                 // Long press opens the macro picker / editor instead of
                                 // silently cycling, so a mis-timed hold can't change what
                                 // the next tap fires.
                                 onLongPress = {
-                                    showMacroPicker = true
-                                    onMacroLongPress()
+                                    if (!isRecording) {
+                                        showMacroPicker = true
+                                        onMacroLongPress()
+                                    }
                                 }
                             )
                         }
@@ -748,14 +764,14 @@ fun GamepadScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = Icons.Default.PlayArrow,
+                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.PlayArrow,
                         contentDescription = null,
-                        tint = if (firing) Color.Black else skin.accent,
+                        tint = if (firing || isRecording) Color.Black else skin.accent,
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
-                        text = macroName,
-                        color = if (firing) Color.Black else skin.accent,
+                        text = if (isRecording) String.format(Locale.US, "%.1fs", recordingMs / 1000f) else macroName,
+                        color = if (firing || isRecording) Color.Black else skin.accent,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -765,6 +781,23 @@ fun GamepadScreen(
                     )
                 }
             }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // RECORDING PILL
+        // Shown while a take is running: the macro button is the stop button, this
+        // is the only other thing on screen so nothing else has to change.
+        // ═══════════════════════════════════════════════════════════════
+        if (isRecording) {
+            RecordingPill(
+                elapsedMs = recordingMs,
+                steps = recordingSteps,
+                onStop = onStopRecording,
+                onDiscard = onDiscardRecording,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 6.dp)
+            )
         }
 
         if (showMacroPicker) {
@@ -779,6 +812,10 @@ fun GamepadScreen(
                 onEdit = { id ->
                     showMacroPicker = false
                     onEditMacro(id)
+                },
+                onRecord = {
+                    showMacroPicker = false
+                    onStartRecording()
                 },
                 onDismiss = { showMacroPicker = false }
             )
@@ -873,6 +910,7 @@ private fun MacroPickerDialog(
     accent: Color,
     onSelect: (String) -> Unit,
     onEdit: (String?) -> Unit,
+    onRecord: () -> Unit,
     onDismiss: () -> Unit
 ) {
     AlertDialog(
@@ -891,15 +929,51 @@ private fun MacroPickerDialog(
             }
         },
         text = {
-            if (macros.isEmpty()) {
-                Text("还没有宏，新建一个吧。", fontSize = 12.sp, color = TextSecondary)
-            } else {
-                Column(
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Record entry sits above the list so it is the first thing a player
+                // who just wants to capture something sees.
+                Row(
                     modifier = Modifier
-                        .heightIn(max = 260.dp)
-                        .verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(RecordRed.copy(alpha = 0.10f))
+                        .border(1.dp, RecordRed.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
+                        .clickable { onRecord() }
+                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(RecordRed)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("录制新宏", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RecordRed)
+                        Text(
+                            "边玩边录，点「停止」自动保存",
+                            fontSize = 9.sp,
+                            color = TextTertiary
+                        )
+                    }
+                    Icon(
+                        Icons.Default.FiberManualRecord,
+                        null,
+                        tint = RecordRed.copy(alpha = 0.8f),
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+
+                if (macros.isEmpty()) {
+                    Text("还没有宏，直接从上面录一个吧。", fontSize = 12.sp, color = TextSecondary)
+                } else {
+                    Column(
+                        modifier = Modifier
+                            .heightIn(max = 240.dp)
+                            .verticalScroll(rememberScrollState()),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                     macros.forEach { m ->
                         val selected = m.id == selectedId
                         Row(
@@ -925,7 +999,7 @@ private fun MacroPickerDialog(
                                     maxLines = 1
                                 )
                                 Text(
-                                    "${m.steps.size} 步 · ${m.durationMs} ms",
+                                    "${m.steps.size} 段 · ${m.durationMs} ms",
                                     fontSize = 9.sp,
                                     color = TextTertiary
                                 )
@@ -956,6 +1030,7 @@ private fun MacroPickerDialog(
                     }
                 }
             }
+            }
         },
         confirmButton = {
             TextButton(onClick = { onEdit(selectedId) }) {
@@ -969,3 +1044,71 @@ private fun MacroPickerDialog(
         }
     )
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Recording pill
+//
+// Deliberately the only extra thing on screen while recording: every control the
+// player touches has to stay reachable, because a take is recorded from the very
+// same on-screen pad.
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun RecordingPill(
+    elapsedMs: Int,
+    steps: Int,
+    onStop: () -> Unit,
+    onDiscard: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var dotOn by remember { mutableStateOf(true) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(450)
+            dotOn = !dotOn
+        }
+    }
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(14.dp))
+            .background(Color(0xFF1A0E10).copy(alpha = 0.94f))
+            .border(1.dp, RecordRed.copy(alpha = 0.55f), RoundedCornerShape(14.dp))
+            .padding(start = 10.dp, end = 4.dp, top = 5.dp, bottom = 5.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(7.dp)
+                .clip(CircleShape)
+                .background(RecordRed.copy(alpha = if (dotOn) 1f else 0.25f))
+        )
+        Text("录制中", color = RecordRed, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        Text(
+            String.format(Locale.US, "%.1fs · %d 段", elapsedMs / 1000f, steps),
+            color = TextSecondary,
+            fontSize = 10.sp
+        )
+        Box(
+            modifier = Modifier
+                .clip(RoundedCornerShape(9.dp))
+                .background(RecordRed)
+                .clickable { onStop() }
+                .padding(horizontal = 9.dp, vertical = 4.dp)
+        ) {
+            Text("停止", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+        }
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .clip(RoundedCornerShape(9.dp))
+                .clickable { onDiscard() },
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Default.Close, null, tint = TextTertiary, modifier = Modifier.size(13.dp))
+        }
+    }
+}
+
+/** Same red the recording UI uses everywhere; not part of the skin palettes. */
+private val RecordRed = Color(0xFFE0453F)

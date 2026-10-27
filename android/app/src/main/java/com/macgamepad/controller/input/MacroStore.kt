@@ -13,20 +13,20 @@ private const val TAG = "MacroStore"
  * [key] doubles as the JSON field name, so a saved macro and a key chip in the
  * editor always refer to the same thing.
  */
-private class FlagField(
+internal class FlagField(
     val key: String,
     val read: (InputState) -> Boolean,
     val write: (InputState, Boolean) -> InputState
 )
 
 /** One analog axis. Only ±1 / 0 is used by the editor; the encoder keeps the exact value. */
-private class AxisField(
+internal class AxisField(
     val key: String,
     val read: (InputState) -> Float,
     val write: (InputState, Float) -> InputState
 )
 
-private val FLAG_FIELDS = listOf(
+internal val FLAG_FIELDS = listOf(
     FlagField("A", { it.buttonA }, { s, v -> s.copy(buttonA = v) }),
     FlagField("B", { it.buttonB }, { s, v -> s.copy(buttonB = v) }),
     FlagField("X", { it.buttonX }, { s, v -> s.copy(buttonX = v) }),
@@ -45,7 +45,7 @@ private val FLAG_FIELDS = listOf(
     FlagField("CAPTURE", { it.buttonCapture }, { s, v -> s.copy(buttonCapture = v) })
 )
 
-private val AXIS_FIELDS = listOf(
+internal val AXIS_FIELDS = listOf(
     AxisField("LX", { it.leftStickX }, { s, v -> s.copy(leftStickX = v) }),
     AxisField("LY", { it.leftStickY }, { s, v -> s.copy(leftStickY = v) }),
     AxisField("RX", { it.rightStickX }, { s, v -> s.copy(rightStickX = v) }),
@@ -177,17 +177,30 @@ internal fun decodeState(o: JSONObject?): InputState {
 /**
  * Clamps a user-edited macro into something the player can actually run.
  *
- * Every step carries its own caption (derived, never typed by the user), which is
- * what the editor and the log lines show.
+ * Steps are sorted by their start so the stored order and the editor order are the
+ * same, and every window is pulled inside the runnable range (a press that starts
+ * after the 20 s mark or lasts longer than 2 s is a typo, not a macro). A press with
+ * nothing held is dropped: on a timeline it would be a no-op, and old recordings
+ * are full of them because gaps used to be encoded as empty steps.
  */
-fun Macro.sanitized(): Macro = copy(
-    name = name.trim().ifEmpty { "未命名宏" }.take(24),
-    steps = steps
+fun Macro.sanitized(): Macro {
+    val owned = steps
         .take(MacroStore.MAX_STEPS)
-        .map { MacroStep(it.ticks.coerceIn(MacroStore.MIN_TICKS, MacroStore.MAX_TICKS), it.state, MacroKeys.summary(it.state)) }
-        .ifEmpty { listOf(MacroStep(2)) },
-    cooldownTicks = cooldownTicks.coerceIn(0, MacroStore.MAX_COOLDOWN)
-)
+        .map {
+            MacroStep(
+                start = it.start.coerceIn(0, MacroStore.MAX_START),
+                ticks = it.ticks.coerceIn(MacroStore.MIN_TICKS, MacroStore.MAX_TICKS),
+                state = it.state
+            )
+        }
+        .filter { !it.isEmpty }
+        .sortedWith(compareBy({ it.start }, { it.end }))
+    return copy(
+        name = name.trim().ifEmpty { "未命名宏" }.take(24),
+        steps = owned.ifEmpty { listOf(MacroStep(start = 0, ticks = 2)) },
+        cooldownTicks = cooldownTicks.coerceIn(0, MacroStore.MAX_COOLDOWN)
+    )
+}
 
 /**
  * Persists the macro list.
@@ -204,11 +217,13 @@ class MacroStore(private val prefs: SharedPreferences) {
         const val MAX_STEPS = 80
         const val MIN_TICKS = 1
         const val MAX_TICKS = 250
+        /** Latest tick a press may start on: 2400 × 8 ms = 19.2 s. */
+        const val MAX_START = 2400
         const val MAX_COOLDOWN = 40
         private const val KEY_OVERRIDES = "overrides"
         private const val KEY_CUSTOM = "custom"
         private const val KEY_VERSION = "version"
-        private const val VERSION = 1
+        private const val VERSION = 2
     }
 
     /** Built-ins (with any user override applied) followed by user-created macros. */
@@ -294,8 +309,13 @@ class MacroStore(private val prefs: SharedPreferences) {
             n++
         }
         val steps = from?.steps?.take(MAX_STEPS)
-            ?: listOf(MacroStep(2, InputState(buttonA = true), "A"), MacroStep(2))
-        return Macro(id = id, name = name, steps = steps, cooldownTicks = from?.cooldownTicks ?: 4)
+            ?: listOf(MacroStep(start = 0, ticks = 3, state = InputState(buttonA = true)))
+        return Macro(
+            id = id,
+            name = name,
+            steps = steps.sortedWith(compareBy({ it.start }, { it.end })),
+            cooldownTicks = from?.cooldownTicks ?: 4
+        )
     }
 
     // ── internals ────────────────────────────────────────────────────────
@@ -309,6 +329,7 @@ class MacroStore(private val prefs: SharedPreferences) {
         macro.steps.forEach { step ->
             steps.put(
                 JSONObject()
+                    .put("o", step.start)
                     .put("t", step.ticks)
                     .put("s", encodeState(step.state))
             )
@@ -317,22 +338,35 @@ class MacroStore(private val prefs: SharedPreferences) {
         return o
     }
 
+    /**
+     * Reads one macro. Files written before the timeline model have no `o` on a
+     * step; those are laid end to end from a running cursor, which is exactly what
+     * the old sequential player did, so old takes keep working unchanged.
+     */
     private fun decode(o: JSONObject?, fallbackId: String?): Macro? {
         o ?: return null
         val id = o.optString("id").ifBlank { fallbackId ?: return null }
         val arr = o.optJSONArray("steps") ?: return null
         val steps = mutableListOf<MacroStep>()
+        var cursor = 0
         for (i in 0 until arr.length()) {
             val s = arr.optJSONObject(i) ?: continue
             val ticks = s.optInt("t", 2).coerceIn(MIN_TICKS, MAX_TICKS)
+            val start = if (s.has("o")) s.optInt("o", cursor).coerceIn(0, MAX_START) else cursor
             val state = decodeState(s.optJSONObject("s"))
-            steps += MacroStep(ticks, state, MacroKeys.summary(state))
+            steps += MacroStep(start, ticks, state)
+            cursor = start + ticks
         }
         if (steps.isEmpty()) return null
         val name = o.optString("name").trim().ifEmpty { "未命名宏" }.take(24)
         val cooldown = o.optInt("c", 4).coerceIn(0, MAX_COOLDOWN)
         return try {
-            Macro(id = id, name = name, steps = steps, cooldownTicks = cooldown)
+            Macro(
+                id = id,
+                name = name,
+                steps = steps.sortedWith(compareBy({ it.start }, { it.end })),
+                cooldownTicks = cooldown
+            )
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "dropping unreadable macro $id", e)
             null

@@ -219,6 +219,8 @@ class MainActivity : ComponentActivity() {
                             val scales by vm.componentScales.collectAsState()
                             val macroId by vm.selectedMacroId.collectAsState()
                             val macroList by vm.macros.collectAsState()
+                            val recording by vm.isRecording.collectAsState()
+                            val recordStats by vm.recordingStats.collectAsState()
 
                             GamepadScreen(
                                 profileId = activeProfileId,
@@ -244,7 +246,13 @@ class MainActivity : ComponentActivity() {
                                 macros = macroList,
                                 selectedMacroId = macroId,
                                 onMacroSelected = { vm.setSelectedMacro(it) },
-                                onEditMacro = { vm.openMacroEditor(it) }
+                                onEditMacro = { vm.openMacroEditor(it) },
+                                isRecording = recording,
+                                recordingMs = recordStats.durationMs,
+                                recordingSteps = recordStats.steps,
+                                onStartRecording = { vm.startRecording() },
+                                onStopRecording = { vm.finishRecording() },
+                                onDiscardRecording = { vm.discardRecording() }
                             )
                         }
 
