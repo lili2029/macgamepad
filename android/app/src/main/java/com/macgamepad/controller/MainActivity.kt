@@ -173,13 +173,20 @@ class MainActivity : ComponentActivity() {
                     when (screen) {
                         GamepadViewModel.Screen.CONNECTION -> {
                             val pairedDevices by vm.pairedDevices.collectAsState()
+                            val autoConnectState by vm.autoConnectState.collectAsState()
+                            val lastHost by vm.lastHostName.collectAsState()
                             ConnectionScreen(
                                 connectionState = connectionState,
                                 connectedDeviceName = connectedDevice,
                                 errorMessage = errorMessage,
                                 pairedDevices = pairedDevices,
+                                autoConnecting = autoConnectState == GamepadViewModel.AutoConnectState.CONNECTING,
+                                autoConnectFailed = autoConnectState == GamepadViewModel.AutoConnectState.FAILED,
+                                lastHostName = lastHost,
                                 onDeviceConnectClick = { vm.connectToDevice(it) },
                                 onConnectClick = { checkPermissionsAndConnect() },
+                                onRetryAutoConnect = { vm.retryAutoConnect() },
+                                onCancelAutoConnect = { vm.cancelAutoConnect() },
                                 onDisconnectClick = { vm.disconnect() },
                                 onStartGamepad = { vm.navigateToGamepad() },
                                 modifier = Modifier.fillMaxSize()
@@ -334,6 +341,8 @@ class MainActivity : ComponentActivity() {
         Intent(this, GamepadService::class.java).also { intent ->
             bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
         }
+        // A link that dropped while we were in the background gets re-dialled here.
+        viewModelRef?.onForeground()
     }
 
     override fun onStop() {

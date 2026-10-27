@@ -32,7 +32,21 @@ class BluetoothGamepadService(private val context: Context) {
 
         // HID subclass for gamepad
         private const val HID_SUBCLASS_GAMEPAD: Byte = 0x02
+
+        // Same preferences file the ViewModel uses: the host we last talked to is
+        // remembered here so the next launch can dial it without any tapping.
+        private const val PREFS_NAME = "macgamepad_prefs"
+        private const val KEY_LAST_HOST_ADDRESS = "last_host_address"
+        private const val KEY_LAST_HOST_NAME = "last_host_name"
     }
+
+    private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    /** True once this install has completed a connection, i.e. there is a host to dial. */
+    val hasSavedHost: Boolean get() = prefs.getString(KEY_LAST_HOST_ADDRESS, null) != null
+
+    /** Friendly name of the remembered host, for the "connecting back to …" copy. */
+    val lastHostName: String? get() = prefs.getString(KEY_LAST_HOST_NAME, null)
 
     // ================================================================
     // Connection state
@@ -92,6 +106,7 @@ class BluetoothGamepadService(private val context: Context) {
                     hostDevice = device
                     _connectedDeviceName.value = deviceName
                     _connectionState.value = ConnectionState.CONNECTED
+                    rememberHost(device, deviceName)
                     Log.i(TAG, "✅ Connected to host: $deviceName")
                 }
                 BluetoothProfile.STATE_CONNECTING -> {
@@ -209,6 +224,52 @@ class BluetoothGamepadService(private val context: Context) {
         val hid = hidDevice ?: return false
         Log.i(TAG, "Attempting to connect to: ${device.name ?: device.address}")
         return hid.connect(device)
+    }
+
+    /**
+     * Dials the host that was connected last time, so relaunching the app doesn't
+     * require walking through pairing again.
+     *
+     * Returns false when there is nothing remembered, the HID app is not registered
+     * yet, or the host is no longer paired — the caller retries a few times, and the
+     * Mac can always start the connection from its own side as well.
+     */
+    @SuppressLint("MissingPermission")
+    fun connectToLastHost(): Boolean {
+        val address = prefs.getString(KEY_LAST_HOST_ADDRESS, null) ?: return false
+        val hid = hidDevice ?: return false
+        val device = try {
+            bluetoothAdapter?.getRemoteDevice(address)
+        } catch (e: IllegalArgumentException) {
+            Log.w(TAG, "Auto-connect: bad remembered address $address")
+            null
+        } ?: return false
+
+        if (device.bondState != BluetoothDevice.BOND_BONDED) {
+            Log.w(TAG, "Auto-connect skipped: $address is no longer paired")
+            return false
+        }
+
+        return try {
+            Log.i(TAG, "Auto-connecting to last host: ${lastHostName ?: address}")
+            hid.connect(device)
+        } catch (e: Exception) {
+            Log.w(TAG, "Auto-connect failed", e)
+            false
+        }
+    }
+
+    /** Overwrites the remembered host; called on every successful connection. */
+    private fun rememberHost(device: BluetoothDevice?, name: String) {
+        val address = device?.address ?: return
+        val previous = prefs.getString(KEY_LAST_HOST_ADDRESS, null)
+        if (previous != address || prefs.getString(KEY_LAST_HOST_NAME, null) != name) {
+            Log.i(TAG, "Remembering host for next launch: $name ($address)")
+        }
+        prefs.edit()
+            .putString(KEY_LAST_HOST_ADDRESS, address)
+            .putString(KEY_LAST_HOST_NAME, name)
+            .apply()
     }
 
     // Active mode configuration

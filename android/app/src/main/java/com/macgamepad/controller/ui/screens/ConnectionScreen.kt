@@ -23,6 +23,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -36,8 +37,13 @@ fun ConnectionScreen(
     connectedDeviceName: String?,
     errorMessage: String?,
     pairedDevices: List<BluetoothDevice>,
+    autoConnecting: Boolean,
+    autoConnectFailed: Boolean,
+    lastHostName: String?,
     onDeviceConnectClick: (BluetoothDevice) -> Unit,
     onConnectClick: () -> Unit,
+    onRetryAutoConnect: () -> Unit,
+    onCancelAutoConnect: () -> Unit,
     onDisconnectClick: () -> Unit,
     onStartGamepad: () -> Unit,
     modifier: Modifier = Modifier
@@ -230,7 +236,7 @@ fun ConnectionScreen(
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 // Status badge
-                ConnectionStatusBadge(connectionState, connectedDeviceName)
+                ConnectionStatusBadge(connectionState, connectedDeviceName, autoConnecting)
 
                 // Error box
                 errorMessage?.let { err ->
@@ -253,44 +259,52 @@ fun ConnectionScreen(
                 }
 
                 // ── State-dependent UI ───────────────────────────────────
-                when (connectionState) {
-                    BluetoothGamepadService.ConnectionState.DISCONNECTED,
-                    BluetoothGamepadService.ConnectionState.ERROR -> {
+                // A boolean-driven `when`: the automatic reconnect outranks the raw
+                // BT state, because mid-handshake the state bounces through
+                // REGISTERING → REGISTERED_WAITING and would flash "可被发现" at the
+                // player right before it connects.
+                when {
+                    autoConnecting -> AutoConnectPanel(
+                        hostName = lastHostName,
+                        onCancel = onCancelAutoConnect
+                    )
+
+                    connectionState == BluetoothGamepadService.ConnectionState.DISCONNECTED ||
+                        connectionState == BluetoothGamepadService.ConnectionState.ERROR -> {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                "将本机注册为蓝牙 HID 手柄。\n然后在 Mac 的「蓝牙」设置里配对连接。",
+                                if (lastHostName != null)
+                                    "上次连接的是「$lastHostName」。\n点下面直接连回去，或重新初始化再配对。"
+                                else
+                                    "将本机注册为蓝牙 HID 手柄。\n然后在 Mac 的「蓝牙」设置里配对连接。",
                                 fontSize = 11.sp,
                                 color = TextSecondary,
                                 textAlign = TextAlign.Center,
                                 lineHeight = 16.sp
                             )
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(50.dp)
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(
-                                        Brush.linearGradient(listOf(AccentBlue, Color(0xFF2563EB)))
-                                    )
-                                    .clickable { onConnectClick() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Row(
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Icon(Icons.Default.Bluetooth, null, tint = Color.White, modifier = Modifier.size(18.dp))
-                                    Text("初始化手柄", fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
-                                }
+                            PrimaryActionButton(
+                                text = if (lastHostName != null) "连接 $lastHostName" else "初始化手柄",
+                                icon = Icons.Default.Bluetooth,
+                                onClick = if (lastHostName != null) onRetryAutoConnect else onConnectClick
+                            )
+                            if (lastHostName != null) {
+                                Text(
+                                    "初始化手柄（重新配对）",
+                                    fontSize = 11.sp,
+                                    color = TextTertiary,
+                                    modifier = Modifier
+                                        .clickable { onConnectClick() }
+                                        .padding(6.dp)
+                                )
                             }
                         }
                     }
 
-                    BluetoothGamepadService.ConnectionState.REGISTERING,
-                    BluetoothGamepadService.ConnectionState.CONNECTING -> {
+                    connectionState == BluetoothGamepadService.ConnectionState.REGISTERING ||
+                        connectionState == BluetoothGamepadService.ConnectionState.CONNECTING -> {
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -309,7 +323,7 @@ fun ConnectionScreen(
                         }
                     }
 
-                    BluetoothGamepadService.ConnectionState.REGISTERED_WAITING -> {
+                    connectionState == BluetoothGamepadService.ConnectionState.REGISTERED_WAITING -> {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(14.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -318,26 +332,72 @@ fun ConnectionScreen(
                             PulsingBeacon()
 
                             Text(
-                                "可被发现 · 等待 Mac 连接",
+                                if (lastHostName != null) "等待「$lastHostName」连接"
+                                else "可被发现 · 等待 Mac 连接",
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = TextPrimary
                             )
 
-                            // Pairing guide card
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(Bg3)
-                                    .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
-                                    .padding(14.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                Text("配对指引", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.5.sp)
-                                PairingStepRow("1", "在 Mac 上打开「系统设置 → 蓝牙」")
-                                PairingStepRow("2", "先删掉旧的手机配对记录")
-                                PairingStepRow("3", "找到本机名称，点「连接」")
+                            // The automatic attempt already ran and gave up: say so
+                            // once, with a one-tap retry, instead of leaving the
+                            // player wondering why nothing happened.
+                            if (autoConnectFailed) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(AccentAmber.copy(alpha = 0.08f))
+                                        .border(1.dp, AccentAmber.copy(alpha = 0.30f), RoundedCornerShape(12.dp))
+                                        .padding(start = 12.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(Icons.Default.SyncProblem, null, tint = AccentAmber, modifier = Modifier.size(14.dp))
+                                    Text(
+                                        "自动连接没成功，可以在 Mac 上点连接，或重试一次。",
+                                        fontSize = 10.sp,
+                                        color = AccentAmber,
+                                        lineHeight = 14.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(AccentAmber.copy(alpha = 0.16f))
+                                            .clickable { onRetryAutoConnect() }
+                                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                                    ) {
+                                        Text("重试", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccentAmber)
+                                    }
+                                }
+                            }
+
+                            // Pairing guide is for the first pairing only; once a host
+                            // is remembered the useful hint is "click the name on the
+                            // Mac", not "delete the old pairing".
+                            if (lastHostName == null) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Bg3)
+                                        .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                                        .padding(14.dp),
+                                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                                ) {
+                                    Text("配对指引", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary, letterSpacing = 0.5.sp)
+                                    PairingStepRow("1", "在 Mac 上打开「系统设置 → 蓝牙」")
+                                    PairingStepRow("2", "先删掉旧的手机配对记录")
+                                    PairingStepRow("3", "找到本机名称，点「连接」")
+                                }
+                            } else {
+                                Text(
+                                    "也可以在 Mac 的「蓝牙」里点本机名称，从主机侧发起。",
+                                    fontSize = 10.sp,
+                                    color = TextTertiary,
+                                    textAlign = TextAlign.Center
+                                )
                             }
 
                             // Paired hosts quick-connect list
@@ -393,7 +453,7 @@ fun ConnectionScreen(
                         }
                     }
 
-                    BluetoothGamepadService.ConnectionState.CONNECTED -> {
+                    connectionState == BluetoothGamepadService.ConnectionState.CONNECTED -> {
                         Column(
                             verticalArrangement = Arrangement.spacedBy(10.dp),
                             horizontalAlignment = Alignment.CenterHorizontally
@@ -440,6 +500,76 @@ fun ConnectionScreen(
                 color = TextTertiary,
                 textAlign = TextAlign.Center
             )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Automatic reconnect — shown while the phone dials the host it used last time
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun AutoConnectPanel(hostName: String?, onCancel: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(56.dp)) {
+            CircularProgressIndicator(
+                color = AccentBlue,
+                strokeWidth = 2.dp,
+                modifier = Modifier.fillMaxSize()
+            )
+            Icon(Icons.Default.Bluetooth, null, tint = AccentBlue, modifier = Modifier.size(20.dp))
+        }
+        Text(
+            if (hostName != null) "正在连接「$hostName」…" else "正在连接上次的主机…",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = TextPrimary,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            "自动注册蓝牙 HID 并连回上次的 Mac，通常一两秒。",
+            fontSize = 10.sp,
+            color = TextTertiary,
+            textAlign = TextAlign.Center
+        )
+        Text(
+            "手动选择主机",
+            fontSize = 11.sp,
+            color = TextSecondary,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable { onCancel() }
+                .padding(horizontal = 10.dp, vertical = 6.dp)
+        )
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Primary action button — the one thing the player is most likely to tap
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun PrimaryActionButton(
+    text: String,
+    icon: ImageVector,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(50.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .background(Brush.linearGradient(listOf(AccentBlue, Color(0xFF2563EB))))
+            .clickable { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, null, tint = Color.White, modifier = Modifier.size(18.dp))
+            Text(text, fontWeight = FontWeight.Bold, fontSize = 14.sp, color = Color.White)
         }
     }
 }
@@ -498,15 +628,19 @@ private fun PulsingBeacon() {
 @Composable
 private fun ConnectionStatusBadge(
     state: BluetoothGamepadService.ConnectionState,
-    deviceName: String?
+    deviceName: String?,
+    autoConnecting: Boolean = false
 ) {
-    val (label, color) = when (state) {
-        BluetoothGamepadService.ConnectionState.DISCONNECTED   -> "未连接" to StatusDisconnected
-        BluetoothGamepadService.ConnectionState.REGISTERING    -> "注册中…" to StatusConnecting
-        BluetoothGamepadService.ConnectionState.REGISTERED_WAITING -> "可被发现" to StatusConnecting
-        BluetoothGamepadService.ConnectionState.CONNECTING     -> "连接中…" to StatusConnecting
-        BluetoothGamepadService.ConnectionState.CONNECTED      -> "已连接 · ${deviceName ?: "Mac"}" to StatusConnected
-        BluetoothGamepadService.ConnectionState.ERROR          -> "出错" to StatusDisconnected
+    // The automatic attempt outranks the raw state: mid-handshake the stack reports
+    // REGISTERED_WAITING, which would read as "可被发现" seconds before connecting.
+    val (label, color) = when {
+        autoConnecting -> "自动连接中…" to StatusConnecting
+        state == BluetoothGamepadService.ConnectionState.DISCONNECTED   -> "未连接" to StatusDisconnected
+        state == BluetoothGamepadService.ConnectionState.REGISTERING    -> "注册中…" to StatusConnecting
+        state == BluetoothGamepadService.ConnectionState.REGISTERED_WAITING -> "可被发现" to StatusConnecting
+        state == BluetoothGamepadService.ConnectionState.CONNECTING     -> "连接中…" to StatusConnecting
+        state == BluetoothGamepadService.ConnectionState.CONNECTED      -> "已连接 · ${deviceName ?: "Mac"}" to StatusConnected
+        else                                                            -> "出错" to StatusDisconnected
     }
 
     Row(

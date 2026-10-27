@@ -2,9 +2,12 @@ package com.macgamepad.controller
 
 import android.app.Application
 import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import android.bluetooth.BluetoothDevice
+import androidx.core.content.ContextCompat
 import com.macgamepad.controller.bt.BluetoothGamepadService
 import com.macgamepad.controller.bt.GamepadService
 import com.macgamepad.controller.input.InputState
@@ -15,6 +18,8 @@ import com.macgamepad.controller.input.MacroStore
 import com.macgamepad.controller.input.sanitized
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -37,6 +42,13 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         // "macro" is a layout element like any other, so the extra button can be
         // dragged, scaled and reset per profile.
         private val LAYOUT_COMPONENTS = listOf("leftStick", "rightStick", "dpad", "abxy", "shoulderL", "shoulderR", "sysButtons", "macro")
+
+        // How long the automatic reconnect is allowed to keep trying before the
+        // manual screen takes over. Long enough for a Mac waking up, short enough
+        // that a phone away from its host isn't stuck on a spinner.
+        private const val AUTO_CONNECT_TIMEOUT_MS = 9_000L
+        private const val AUTO_CONNECT_FIRST_DELAY_MS = 350L
+        private const val AUTO_CONNECT_RETRY_DELAY_MS = 2_400L
     }
 
     private val prefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -88,6 +100,37 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
     private val _pairedDevices = MutableStateFlow<List<BluetoothDevice>>(emptyList())
     val pairedDevices: StateFlow<List<BluetoothDevice>> = _pairedDevices.asStateFlow()
 
+    // ================================================================
+    // Auto-connect
+    //
+    // Relaunching the app shouldn't mean re-pairing every time: the host that was
+    // connected last is remembered by the BT service, and this side dials it as
+    // soon as the HID app is registered. Only when that fails does the player get
+    // the manual connection screen.
+    // ================================================================
+    enum class AutoConnectState {
+        /** Nothing in flight — the screen shows whatever the BT state is. */
+        IDLE,
+        /** Dialling the remembered host; the connection screen stays in a waiting pose. */
+        CONNECTING,
+        /** Gave up after [AUTO_CONNECT_TIMEOUT_MS]; the manual options are offered. */
+        FAILED
+    }
+
+    private val _autoConnectState = MutableStateFlow(AutoConnectState.IDLE)
+    val autoConnectState: StateFlow<AutoConnectState> = _autoConnectState.asStateFlow()
+
+    /** Name of the host we would reconnect to, for the UI copy. */
+    private val _lastHostName = MutableStateFlow<String?>(null)
+    val lastHostName: StateFlow<String?> = _lastHostName.asStateFlow()
+
+    private var autoConnectJob: Job? = null
+    private var launchAutoConnectDone = false
+    /** True once this process has seen a live link, used by [onForeground]. */
+    private var wasConnected = false
+    /** Set when the player disconnects on purpose; automatic attempts must not undo that. */
+    private var optedOut = false
+
     // Persistent configuration flows
     private val _sensitivity = MutableStateFlow(prefs.getFloat("pref_sensitivity", 1.0f))
     val sensitivity: StateFlow<Float> = _sensitivity.asStateFlow()
@@ -104,7 +147,9 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
     private val _gyroEnabled = MutableStateFlow(prefs.getBoolean("pref_gyro", false))
     val gyroEnabled: StateFlow<Boolean> = _gyroEnabled.asStateFlow()
 
-    private val _autoReconnect = MutableStateFlow(prefs.getBoolean("pref_auto_reconnect", false))
+    // Off by default? No: reconnecting to the host you used five minutes ago is the
+    // common case, so the toggle now defaults to on and can be switched off here.
+    private val _autoReconnect = MutableStateFlow(prefs.getBoolean("pref_auto_reconnect", true))
     val autoReconnect: StateFlow<Boolean> = _autoReconnect.asStateFlow()
 
     private val _vibrationEnabled = MutableStateFlow(prefs.getBoolean("pref_vibration", true))
@@ -163,7 +208,130 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
             service.updatePreferences(_sensitivity.value, _deadZone.value, _gyroEnabled.value)
             updateTargetDeviceName()
             observeRecording(service)
+
+            _lastHostName.value = service.btService.lastHostName
+            maybeAutoConnectOnLaunch(service)
         }
+    }
+
+    /**
+     * Runs at most once per process launch: bring the HID app up and dial the host
+     * we were connected to last time, skipping both the "初始化手柄" tap and the
+     * discoverability dialog (a paired host doesn't need to be discoverable).
+     */
+    private fun maybeAutoConnectOnLaunch(service: GamepadService) {
+        if (launchAutoConnectDone) return
+        launchAutoConnectDone = true
+
+        if (!_autoReconnect.value) {
+            Log.i(TAG, "Auto-connect on launch is off")
+            return
+        }
+        if (!service.btService.hasSavedHost) {
+            Log.i(TAG, "Auto-connect: no remembered host yet")
+            return
+        }
+        if (!hasBluetoothPermissions()) {
+            Log.i(TAG, "Auto-connect: bluetooth permissions not granted yet")
+            return
+        }
+        // The service may already be connected (Activity recreated while the
+        // foreground service kept the link): nothing to do then.
+        if (_connectionState.value == BluetoothGamepadService.ConnectionState.CONNECTED) return
+        startAutoConnect()
+    }
+
+    /**
+     * Registers the HID app and keeps trying the remembered host for a few seconds.
+     * Any manual action (picking a device, disconnecting) cancels it, so the two
+     * paths never fight over the same link.
+     */
+    fun startAutoConnect() {
+        val service = _gamepadService.value ?: return
+        if (!service.btService.hasSavedHost) return
+
+        autoConnectJob?.cancel()
+        _autoConnectState.value = AutoConnectState.CONNECTING
+        _lastHostName.value = service.btService.lastHostName
+
+        // Registers the HID app (and keeps waiting for the Mac) without asking for
+        // discoverability — the host already knows us. A retry finds the app already
+        // registered, and re-registering would tear down a live link.
+        val btState = service.btService.connectionState.value
+        if (btState == BluetoothGamepadService.ConnectionState.DISCONNECTED ||
+            btState == BluetoothGamepadService.ConnectionState.ERROR
+        ) {
+            service.startSession()
+        }
+
+        autoConnectJob = viewModelScope.launch {
+            val deadline = System.currentTimeMillis() + AUTO_CONNECT_TIMEOUT_MS
+            var attempts = 0
+            while (isActive && System.currentTimeMillis() < deadline) {
+                delay(if (attempts == 0) AUTO_CONNECT_FIRST_DELAY_MS else AUTO_CONNECT_RETRY_DELAY_MS)
+                attempts++
+                when (_connectionState.value) {
+                    BluetoothGamepadService.ConnectionState.CONNECTED,
+                    BluetoothGamepadService.ConnectionState.CONNECTING -> return@launch
+                    else -> service.btService.connectToLastHost()
+                }
+            }
+            if (_connectionState.value != BluetoothGamepadService.ConnectionState.CONNECTED) {
+                Log.i(TAG, "Auto-connect gave up after $attempts attempts")
+                _autoConnectState.value = AutoConnectState.FAILED
+            }
+        }
+    }
+
+    /** Stops the automatic attempt and hands the connection screen back to the player. */
+    fun cancelAutoConnect() {
+        autoConnectJob?.cancel()
+        autoConnectJob = null
+        if (_autoConnectState.value == AutoConnectState.CONNECTING) {
+            Log.i(TAG, "Auto-connect cancelled by the player")
+            _autoConnectState.value = AutoConnectState.IDLE
+        }
+    }
+
+    /** "再试一次" on the failed banner. */
+    fun retryAutoConnect() {
+        optedOut = false
+        startAutoConnect()
+    }
+
+    /**
+     * Called when the Activity comes back to the foreground. A link that died while
+     * the app was in the background (Mac asleep, out of range) is re-dialled quietly
+     * instead of making the player notice and tap again. A deliberate disconnect is
+     * respected, and the very first launch is handled by [maybeAutoConnectOnLaunch],
+     * which doesn't need this.
+     */
+    fun onForeground() {
+        if (!wasConnected || optedOut) return
+        if (!_autoReconnect.value) return
+        val service = _gamepadService.value ?: return
+        if (!service.btService.hasSavedHost) return
+        if (_connectionState.value == BluetoothGamepadService.ConnectionState.CONNECTED) return
+        if (_autoConnectState.value == AutoConnectState.CONNECTING) return
+        Log.i(TAG, "Link was down on resume, re-dialling the remembered host")
+        startAutoConnect()
+    }
+
+    private fun hasBluetoothPermissions(): Boolean {
+        val app = getApplication<Application>()
+        val required = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(
+                android.Manifest.permission.BLUETOOTH_CONNECT,
+                android.Manifest.permission.BLUETOOTH_SCAN,
+                android.Manifest.permission.BLUETOOTH_ADVERTISE
+            )
+        } else {
+            listOf(
+                android.Manifest.permission.BLUETOOTH,
+                android.Manifest.permission.BLUETOOTH_ADMIN
+            )
+        }
+        return required.all { ContextCompat.checkSelfPermission(app, it) == PackageManager.PERMISSION_GRANTED }
     }
 
     /**
@@ -210,6 +378,17 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
             _pairedDevices.value = service.btService.getBondedDevices()
         }
 
+        if (connState == BluetoothGamepadService.ConnectionState.CONNECTED) {
+            // The link is up: whatever automatic attempt was in flight is done, and
+            // the name to show next time is the one we just talked to.
+            autoConnectJob?.cancel()
+            autoConnectJob = null
+            _autoConnectState.value = AutoConnectState.IDLE
+            if (devName != null) _lastHostName.value = devName
+            wasConnected = true
+            optedOut = false
+        }
+
         // On connect: jump from Connection screen to Dashboard
         if (connState == BluetoothGamepadService.ConnectionState.CONNECTED && _currentScreen.value == Screen.CONNECTION) {
             _currentScreen.value = Screen.DASHBOARD
@@ -227,6 +406,9 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
     fun initializeBluetooth() {
         val service = _gamepadService.value
         if (service != null) {
+            // The manual path owns the session from here on.
+            cancelAutoConnect()
+            optedOut = false
             updateTargetDeviceName()
             service.startSession()
         } else {
@@ -235,10 +417,18 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
     }
 
     fun connectToDevice(device: BluetoothDevice) {
+        // An explicit pick wins over whatever the automatic attempt was doing.
+        cancelAutoConnect()
+        optedOut = false
         _gamepadService.value?.btService?.connectToDevice(device)
     }
 
     fun disconnect() {
+        cancelAutoConnect()
+        _autoConnectState.value = AutoConnectState.IDLE
+        // Deliberate: don't silently reconnect the moment the app is resumed.
+        optedOut = true
+        wasConnected = false
         _gamepadService.value?.stopSession()
         _currentScreen.value = Screen.CONNECTION
     }
