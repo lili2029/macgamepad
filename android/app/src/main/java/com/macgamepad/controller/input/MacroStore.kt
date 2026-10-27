@@ -187,10 +187,16 @@ fun Macro.sanitized(): Macro {
     val owned = steps
         .take(MacroStore.MAX_STEPS)
         .map {
+            val burst = it.burstTicks.coerceIn(1, MacroStore.MAX_TICKS)
             MacroStep(
                 start = it.start.coerceIn(0, MacroStore.MAX_START),
                 ticks = it.ticks.coerceIn(MacroStore.MIN_TICKS, MacroStore.MAX_TICKS),
-                state = it.state
+                state = it.state,
+                mode = it.mode,
+                // A turbo whose burst fills the whole cycle would be a hold with
+                // extra bookkeeping, so the gap always keeps at least one tick.
+                burstTicks = burst,
+                gapTicks = it.gapTicks.coerceIn(1, MacroStore.MAX_TICKS)
             )
         }
         .filter { !it.isEmpty }
@@ -327,12 +333,17 @@ class MacroStore(private val prefs: SharedPreferences) {
         o.put("c", macro.cooldownTicks)
         val steps = JSONArray()
         macro.steps.forEach { step ->
-            steps.put(
-                JSONObject()
-                    .put("o", step.start)
-                    .put("t", step.ticks)
-                    .put("s", encodeState(step.state))
-            )
+            val o = JSONObject()
+                .put("o", step.start)
+                .put("t", step.ticks)
+                .put("s", encodeState(step.state))
+            // Only turbo presses pay for the extra fields.
+            if (step.mode == PressMode.TURBO) {
+                o.put("m", 1)
+                o.put("b", step.burstTicks)
+                o.put("g", step.gapTicks)
+            }
+            steps.put(o)
         }
         o.put("steps", steps)
         return o
@@ -354,7 +365,15 @@ class MacroStore(private val prefs: SharedPreferences) {
             val ticks = s.optInt("t", 2).coerceIn(MIN_TICKS, MAX_TICKS)
             val start = if (s.has("o")) s.optInt("o", cursor).coerceIn(0, MAX_START) else cursor
             val state = decodeState(s.optJSONObject("s"))
-            steps += MacroStep(start, ticks, state)
+            val mode = if (s.optInt("m", 0) == 1) PressMode.TURBO else PressMode.HOLD
+            steps += MacroStep(
+                start = start,
+                ticks = ticks,
+                state = state,
+                mode = mode,
+                burstTicks = s.optInt("b", 2).coerceIn(1, MAX_TICKS),
+                gapTicks = s.optInt("g", 2).coerceIn(1, MAX_TICKS)
+            )
             cursor = start + ticks
         }
         if (steps.isEmpty()) return null

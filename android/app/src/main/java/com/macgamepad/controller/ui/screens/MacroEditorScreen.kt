@@ -42,6 +42,7 @@ import com.macgamepad.controller.input.MacroKeys
 import com.macgamepad.controller.input.MacroLibrary
 import com.macgamepad.controller.input.MacroStep
 import com.macgamepad.controller.input.MacroStore
+import com.macgamepad.controller.input.PressMode
 import com.macgamepad.controller.input.sanitized
 import com.macgamepad.controller.ui.theme.*
 import kotlinx.coroutines.delay
@@ -290,6 +291,20 @@ fun MacroEditorScreen(
                     onTicks = { value ->
                         updateStep(index) { it.copy(ticks = value.coerceIn(1, 250)) }
                     },
+                    onMode = { mode ->
+                        updateStep(index) { step ->
+                            if (mode == PressMode.HOLD) {
+                                step.copy(mode = PressMode.HOLD)
+                            } else {
+                                // A turbo needs room for a few cycles or it is just a tap
+                                // with extra bookkeeping, so the window grows to fit four.
+                                val period = (step.burstTicks + step.gapTicks).coerceAtLeast(2)
+                                step.copy(mode = PressMode.TURBO, ticks = maxOf(step.ticks, period * 4))
+                            }
+                        }
+                    },
+                    onBurst = { value -> updateStep(index) { it.copy(burstTicks = value.coerceIn(1, 60)) } },
+                    onGap = { value -> updateStep(index) { it.copy(gapTicks = value.coerceIn(1, 60)) } },
                     onDuplicate = {
                         if (steps.size < 80) {
                             val list = steps.toMutableList()
@@ -415,7 +430,7 @@ fun MacroEditorScreen(
                 }
             }
             Text(
-                "贴士：短按建议 ≥3 tick（24 ms），短于 16 ms 的按下会被不少游戏当成抖动；两根并存的段不要同时按同一个键。",
+                "贴士：短按建议 ≥3 tick（24 ms）；「按住」是一路压着不放，「连击」在同一段时间里按「每下/间隔」的节拍重复点。两段并存的窗口不要同时按同一个键。",
                 fontSize = 9.sp,
                 color = TextTertiary,
                 textAlign = TextAlign.Start
@@ -470,7 +485,8 @@ fun MacroEditorScreen(
 /**
  * Every press as one bar on a shared clock, one row each. Overlapping rows are the
  * visual answer to "am I really holding ZL while tapping X?" — if two bars sit on
- * top of each other, the phone merges them into one report.
+ * top of each other, the phone merges them into one report. A turbo press is drawn
+ * as the row of short taps it actually is.
  */
 @Composable
 private fun MacroTimeline(
@@ -485,39 +501,42 @@ private fun MacroTimeline(
     Canvas(modifier = modifier) {
         val rowH = size.height / rows
         val barH = (rowH * 0.68f).coerceIn(1.5f, 9.dp.toPx())
-        // Nothing on the clock yet: draw the empty rail so the strip still reads as
-        // a timeline rather than a stray line.
+        fun x(tick: Int) = size.width * tick / span
+
+        fun bar(from: Int, to: Int, y: Float, color: Color, minWidth: Float = 2.dp.toPx()) {
+            val x1 = x(from)
+            val x2 = x(to)
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(x1, y),
+                size = Size((x2 - x1).coerceAtLeast(minWidth), barH),
+                cornerRadius = CornerRadius(barH / 2f)
+            )
+        }
+
+        // Nothing pressed yet: keep a faint rail so the strip still reads as a clock.
         drawRoundRect(
             color = BorderSubtle.copy(alpha = 0.5f),
             topLeft = Offset(0f, size.height / 2f - 0.5.dp.toPx()),
             size = Size(size.width, 1.dp.toPx()),
             cornerRadius = CornerRadius(1f)
         )
+
         steps.forEachIndexed { index, step ->
-            val x1 = size.width * step.start / span
-            val x2 = size.width * step.end / span
             val y = index * rowH + (rowH - barH) / 2f
-            val empty = step.isEmpty
             val color = when {
-                empty -> BorderSubtle
-                index == selected -> AccentAmber
-                else -> AccentCyan
+                step.isEmpty -> BorderSubtle.copy(alpha = 0.5f)
+                index == selected -> AccentAmber.copy(alpha = 0.9f)
+                else -> AccentCyan.copy(alpha = 0.85f)
             }
-            drawRoundRect(
-                color = color.copy(alpha = if (empty) 0.5f else 0.85f),
-                topLeft = Offset(x1, y),
-                size = Size((x2 - x1).coerceAtLeast(2.dp.toPx()), barH),
-                cornerRadius = CornerRadius(barH / 2f)
-            )
-            // A live hold longer than ~12% of the timeline gets a hatch mark at its
-            // end, so a long bar cannot be mistaken for a row that never stops.
-            if (!empty && step.ticks * 100 / span >= 12) {
-                drawRoundRect(
-                    color = Color.Black.copy(alpha = 0.35f),
-                    topLeft = Offset(x2 - 1.5.dp.toPx(), y),
-                    size = Size(1.5.dp.toPx(), barH),
-                    cornerRadius = CornerRadius(1f)
-                )
+            if (step.mode == PressMode.TURBO) {
+                var at = step.start
+                while (at < step.end) {
+                    bar(at, minOf(at + step.burstTicks, step.end), y, color, minWidth = 1.dp.toPx())
+                    at += step.periodTicks
+                }
+            } else {
+                bar(step.start, step.end, y, color)
             }
         }
     }
@@ -537,6 +556,9 @@ private fun PressRow(
     onStart: (Int) -> Unit,
     onStartDone: () -> Unit,
     onTicks: (Int) -> Unit,
+    onMode: (PressMode) -> Unit,
+    onBurst: (Int) -> Unit,
+    onGap: (Int) -> Unit,
     onDuplicate: () -> Unit,
     onStartTogether: () -> Unit,
     onInsertInside: () -> Unit,
@@ -546,13 +568,14 @@ private fun PressRow(
     var menuOpen by remember { mutableStateOf(false) }
     val summary = step.caption
     val accent = if (summary.isEmpty()) TextTertiary else AccentCyan
+    val turbo = step.mode == PressMode.TURBO
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .background(Bg2)
-            .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+            .border(1.dp, if (turbo) AccentAmber.copy(alpha = 0.35f) else BorderSubtle, RoundedCornerShape(12.dp))
             .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
@@ -580,7 +603,7 @@ private fun PressRow(
                     .padding(vertical = 2.dp)
             ) {
                 Text(
-                    text = if (summary.isEmpty()) "未设置按键（点击选择）" else summary,
+                    text = if (summary.isEmpty()) "未设置按键（点击选择）" else step.fullCaption,
                     fontSize = 13.sp,
                     fontWeight = if (summary.isEmpty()) FontWeight.Normal else FontWeight.SemiBold,
                     fontStyle = if (summary.isEmpty()) FontStyle.Italic else FontStyle.Normal,
@@ -650,6 +673,67 @@ private fun PressRow(
             onChange = onTicks,
             onChangeFinished = {},
             tint = AccentCyan
+        )
+
+        // ── 按住 / 连击 ──────────────────────────────────────────────────────
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text("方式", fontSize = 9.sp, color = TextTertiary, modifier = Modifier.width(22.dp))
+            ModeChip("按住", selected = !turbo) { onMode(PressMode.HOLD) }
+            ModeChip("连击", selected = turbo) { onMode(PressMode.TURBO) }
+            Spacer(Modifier.weight(1f))
+            if (turbo) {
+                Text(
+                    "${step.burstTicks * Macro.TICK_MS}ms 按 / ${step.gapTicks * Macro.TICK_MS}ms 停 · ×${step.repeatCount}",
+                    fontSize = 9.sp,
+                    color = TextTertiary
+                )
+            }
+        }
+
+        if (turbo) {
+            TimeBar(
+                label = "每下",
+                ticks = step.burstTicks,
+                maxTicks = 60,
+                onChange = onBurst,
+                onChangeFinished = {},
+                tint = AccentAmber
+            )
+            TimeBar(
+                label = "间隔",
+                ticks = step.gapTicks,
+                maxTicks = 60,
+                onChange = onGap,
+                onChangeFinished = {},
+                tint = AccentAmber
+            )
+        }
+    }
+}
+
+@Composable
+private fun ModeChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val tint = if (selected) AccentAmber else TextTertiary
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (selected) AccentAmber.copy(alpha = 0.16f) else Bg3)
+            .border(1.dp, if (selected) AccentAmber.copy(alpha = 0.55f) else BorderSubtle, RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            fontSize = 10.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = tint
         )
     }
 }

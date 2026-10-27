@@ -161,8 +161,13 @@ class MacroRecorder {
         val channel: String,
         val start: Int,
         var ticks: Int,
-        val apply: (InputState) -> InputState
-    )
+        val apply: (InputState) -> InputState,
+        val mode: PressMode = PressMode.HOLD,
+        val burstTicks: Int = 0,
+        val gapTicks: Int = 0
+    ) {
+        val end: Int get() = start + ticks
+    }
 
     /** Splits every frame into one span per control that is doing something. */
     private fun collectSpans(runs: List<Run>): List<Span> {
@@ -171,11 +176,11 @@ class MacroRecorder {
         for (run in runs) {
             val dur = run.ticks
             FLAG_FIELDS.forEach { f ->
-                if (f.read(run.state)) spans += Span(f.key, t, dur) { s -> f.write(s, true) }
+                if (f.read(run.state)) spans += Span(f.key, t, dur, apply = { s -> f.write(s, true) })
             }
             AXIS_FIELDS.forEach { f ->
                 val v = f.read(run.state)
-                if (v != 0f) spans += Span("${f.key}=$v", t, dur) { s -> f.write(s, v) }
+                if (v != 0f) spans += Span("${f.key}=$v", t, dur, apply = { s -> f.write(s, v) })
             }
             t += dur
         }
@@ -185,8 +190,9 @@ class MacroRecorder {
     /**
      * Glues neighbouring spans of the same control back together (a hold that was
      * recorded as two runs because another button changed meanwhile becomes one
-     * bar), splits the ones that outgrow the per-step limit, and finally bundles
-     * every control that shares a window into one step.
+     * bar), folds an evenly spaced series of taps into one turbo press, splits the
+     * holds that outgrow the per-step limit, and finally bundles every control that
+     * shares a window into one step.
      */
     private fun spansToSteps(spans: List<Span>): List<MacroStep> {
         val merged = ArrayList<Span>()
@@ -194,8 +200,8 @@ class MacroRecorder {
             val sorted = list.sortedBy { it.start }
             var current = sorted.first()
             for (next in sorted.drop(1)) {
-                if (next.start <= current.start + current.ticks) {
-                    current.ticks = maxOf(current.ticks, next.start + next.ticks - current.start)
+                if (next.start <= current.end) {
+                    current.ticks = maxOf(current.ticks, next.end - current.start)
                 } else {
                     merged += current
                     current = next
@@ -204,8 +210,22 @@ class MacroRecorder {
             merged += current
         }
 
+        val folded = merged
+            .groupBy { it.channel }
+            .values
+            .flatMap { detectTurbo(it.sortedBy { span -> span.start }) }
+
         val split = ArrayList<Span>()
-        merged.forEach { span ->
+        folded.forEach { span ->
+            if (span.mode == PressMode.TURBO) {
+                // A turbo is a rhythm, so it is only clipped rather than re-cut:
+                // splitting it mid-cycle would restart the pattern.
+                split += if (span.ticks <= MacroStore.MAX_TICKS) span else Span(
+                    span.channel, span.start, MacroStore.MAX_TICKS, span.apply,
+                    span.mode, span.burstTicks, span.gapTicks
+                )
+                return@forEach
+            }
             var left = span.ticks
             var at = span.start
             while (left > 0) {
@@ -217,15 +237,68 @@ class MacroRecorder {
         }
 
         return split
-            .groupBy { it.start to it.ticks }
-            .map { (window, group) ->
+            .groupBy { listOf(it.start, it.ticks, it.mode.ordinal, it.burstTicks, it.gapTicks) }
+            .map { (key, group) ->
+                val first = group.first()
                 MacroStep(
-                    start = window.first,
-                    ticks = window.second,
-                    state = group.fold(InputState()) { acc, span -> span.apply(acc) }
+                    start = first.start,
+                    ticks = first.ticks,
+                    state = group.fold(InputState()) { acc, span -> span.apply(acc) },
+                    mode = first.mode,
+                    burstTicks = if (first.mode == PressMode.TURBO) first.burstTicks else 2,
+                    gapTicks = if (first.mode == PressMode.TURBO) first.gapTicks else 2
                 )
             }
             .sortedWith(compareBy({ it.start }, { it.end }))
+    }
+
+    /**
+     * Recognises a mash: four or more taps of the same control, each roughly the
+     * same length, spaced roughly the same distance apart. Turning that into a
+     * single turbo press keeps "tap A in a dialogue" to one editable row instead of
+     * a dozen rows that all have to be retimed by hand.
+     *
+     * Roughly is deliberate — a thumb is never sample-accurate — so both the tap
+     * length and the silent gap are allowed to drift by a tick.
+     */
+    private fun detectTurbo(spans: List<Span>): List<Span> {
+        val out = ArrayList<Span>()
+        var i = 0
+        while (i < spans.size) {
+            val first = spans[i]
+            var last = i
+            var gap = -1
+            if (i + 1 < spans.size) {
+                gap = spans[i + 1].start - first.end
+                if (gap >= 1) {
+                    var j = i + 1
+                    while (j + 1 < spans.size) {
+                        val a = spans[j]
+                        val b = spans[j + 1]
+                        val between = b.start - a.end
+                        if (abs(between - gap) <= 1 && abs(b.ticks - first.ticks) <= 1) j++ else break
+                    }
+                    last = j
+                }
+            }
+            val taps = last - i + 1
+            if (taps >= TURBO_MIN_TAPS && gap >= 1) {
+                out += Span(
+                    channel = first.channel,
+                    start = first.start,
+                    ticks = spans[last].end - first.start,
+                    apply = first.apply,
+                    mode = PressMode.TURBO,
+                    burstTicks = first.ticks,
+                    gapTicks = gap
+                )
+                i = last + 1
+            } else {
+                out += first
+                i++
+            }
+        }
+        return out
     }
 
     /** Collapses frame-to-frame noise so a still thumb doesn't create steps. */
@@ -255,5 +328,8 @@ class MacroRecorder {
         private const val STICK_DEAD_ZONE = 0.12f
         private const val STICK_QUANTUM = 0.25f
         private const val TRIGGER_THRESHOLD = 0.4f
+
+        /** Fewer taps than this is a deliberate rhythm, not a mash. */
+        private const val TURBO_MIN_TAPS = 4
     }
 }

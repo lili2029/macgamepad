@@ -19,18 +19,52 @@ package com.macgamepad.controller.input
  * press does not touch that control", and whatever the player is physically doing
  * is kept (see [withMacroOverlay]).
  */
+/**
+ * How a press behaves inside its own window.
+ *
+ * [HOLD] is the plain "keep the button down" case — ZL, a stick push, a chord.
+ * [TURBO] turns the same window into a repeating tap: it is down for
+ * [MacroStep.burstTicks], up for [MacroStep.gapTicks], over and over. Mashing A
+ * through a dialogue box is one turbo press instead of twenty hand-placed rows.
+ */
+enum class PressMode { HOLD, TURBO }
+
 data class MacroStep(
     /** When this press starts, in 8 ms ticks from the beginning of the macro. */
     val start: Int = 0,
-    /** How long it is held, in ticks. 2 ticks = 16 ms is the practical floor. */
+    /** How long the press owns the button, in ticks — the whole window, turbo or not. */
     val ticks: Int = 2,
-    val state: InputState = InputState()
+    val state: InputState = InputState(),
+    val mode: PressMode = PressMode.HOLD,
+    /** Turbo only: how long each tap stays down. */
+    val burstTicks: Int = 2,
+    /** Turbo only: silence between two taps. */
+    val gapTicks: Int = 2
 ) {
     /** One past the last tick this press is live on. */
     val end: Int get() = start + ticks
 
+    /** Down-for / up-for cycle of a turbo press; never shorter than two ticks. */
+    val periodTicks: Int get() = (burstTicks + gapTicks).coerceAtLeast(2)
+
+    /** How many taps a turbo press manages to start inside its window. */
+    val repeatCount: Int
+        get() = if (mode == PressMode.HOLD) 1 else ((ticks + gapTicks) / periodTicks).coerceAtLeast(1)
+
+    /** True on the ticks this press actually has the buttons down. */
+    fun isLiveAt(tick: Int): Boolean {
+        if (tick < start || tick >= end) return false
+        if (mode == PressMode.HOLD) return true
+        val local = tick - start
+        return local % periodTicks < burstTicks.coerceIn(1, periodTicks - 1)
+    }
+
     /** "ZL+A" style caption, derived rather than typed. */
     val caption: String get() = MacroKeys.summary(state)
+
+    /** Caption plus the repeat count, for lists that have the room. */
+    val fullCaption: String
+        get() = if (mode == PressMode.TURBO) "${caption} 连击 ×$repeatCount" else caption
 
     val isEmpty: Boolean get() = MacroKeys.isEmpty(state)
 }
@@ -78,7 +112,7 @@ data class Macro(
     fun overlayAt(tick: Int): InputState {
         var merged = InputState()
         for (step in steps) {
-            if (tick >= step.start && tick < step.end) merged = merged.union(step.state)
+            if (step.isLiveAt(tick)) merged = merged.union(step.state)
         }
         return merged
     }
@@ -271,13 +305,20 @@ object MacroLibrary {
         )
     )
 
-    /** Mash A five times, for dialogue and "press repeatedly" prompts. */
+    /** Mash A five times, for dialogue and "press repeatedly" prompts: one turbo press. */
     val mashA = Macro(
         id = "mash_a",
         name = "连发 A ×5",
-        steps = List(5) { i ->
-            MacroStep(start = i * 4, ticks = 2, state = InputState(buttonA = true))
-        }
+        steps = listOf(
+            MacroStep(
+                start = 0,
+                ticks = 18,
+                state = InputState(buttonA = true),
+                mode = PressMode.TURBO,
+                burstTicks = 2,
+                gapTicks = 2
+            )
+        )
     )
 
     /** Dodge/backstep style: B then X, the second input inside the first's recovery. */
