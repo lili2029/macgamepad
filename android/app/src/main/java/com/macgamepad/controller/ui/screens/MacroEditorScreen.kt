@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -30,11 +31,13 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.macgamepad.controller.input.InputState
@@ -120,6 +123,8 @@ fun MacroEditorScreen(
 
     // Bulk move. Normally it means "the whole script", but 「选择」 narrows it to the
     // ticked rows, which is the "only these three should move" case.
+    // Bulk tools are folded away by default so the step list gets the height.
+    var toolsOpen by remember(macro.id) { mutableStateOf(false) }
     var selecting by remember(macro.id) { mutableStateOf(false) }
     var selection by remember(macro.id) { mutableStateOf<Set<Int>>(emptySet()) }
 
@@ -300,36 +305,67 @@ fun MacroEditorScreen(
 
         HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
 
+        // The header is deliberately thin: this screen exists for the step list, so
+        // the name, the numbers and the timeline share two rows and the bulk tools
+        // fold away behind one chip. Entering 「选择」 unfolds them on its own.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            OutlinedTextField(
-                value = name,
-                onValueChange = { name = it.take(24) },
-                singleLine = true,
-                label = { Text("宏名称", fontSize = 11.sp, color = TextTertiary) },
-                textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = AccentBlue,
-                    unfocusedBorderColor = BorderSubtle,
-                    focusedContainerColor = Bg2,
-                    unfocusedContainerColor = Bg2,
-                    cursorColor = AccentBlue
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                StatPill("按压", "${steps.size} 段")
-                StatPill("总长", "${draft.durationMs} ms")
-                StatPill("收尾", "${cooldown * Macro.TICK_MS} ms")
-                if (draft.hasOverlap) StatPill("重叠", "有同时按下")
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(38.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Bg2)
+                        .border(1.dp, BorderSubtle, RoundedCornerShape(9.dp))
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    BasicTextField(
+                        value = name,
+                        onValueChange = { name = it.take(24) },
+                        singleLine = true,
+                        textStyle = TextStyle(
+                            color = TextPrimary,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        cursorBrush = SolidColor(AccentBlue),
+                        decorationBox = { inner ->
+                            Box(contentAlignment = Alignment.CenterStart) {
+                                if (name.isEmpty()) {
+                                    Text("宏名称", fontSize = 13.sp, color = TextTertiary)
+                                }
+                                inner()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        "${steps.size} 段 · ${draft.durationMs} ms",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextSecondary,
+                        maxLines = 1
+                    )
+                    Text(
+                        if (draft.hasOverlap) "收尾 ${cooldown * Macro.TICK_MS} ms · 有重叠"
+                        else "收尾 ${cooldown * Macro.TICK_MS} ms",
+                        fontSize = 9.sp,
+                        color = TextTertiary,
+                        maxLines = 1
+                    )
+                }
             }
 
             // ── Timeline strip ──────────────────────────────────────────────
@@ -340,86 +376,98 @@ fun MacroEditorScreen(
                 marked = if (selecting) selection else emptySet(),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(88.dp)
+                    .height(64.dp)
                     .clip(RoundedCornerShape(10.dp))
                     .background(Bg2)
                     .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
-                    .padding(8.dp)
+                    .padding(6.dp)
             )
+
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
                 Text("0 ms", fontSize = 9.sp, color = TextTertiary)
                 Text(
-                    "一行 = 一段按压 · 上下重叠就是同时按住",
+                    "一行 = 一段按压 · 重叠就是同时按住",
                     fontSize = 9.sp,
-                    color = TextTertiary
-                )
-                Text("${draft.durationMs} ms", fontSize = 9.sp, color = TextTertiary)
-            }
-
-            // Bulk nudge: the whole script by default, only the ticked presses while
-            // 「选择」 is on. Spacing inside the moved group is preserved.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    if (selecting) "已选 ${selection.size}" else "整批",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (selecting) AccentBlue else TextTertiary,
-                    modifier = Modifier.width(34.dp)
-                )
-                ShiftChip("−200", enabled = shiftRoomBack <= -25) { shift(-25) }
-                ShiftChip("−40", enabled = shiftRoomBack <= -5) { shift(-5) }
-                Spacer(Modifier.weight(1f))
-                ShiftChip("+40", enabled = shiftRoomForward >= 5) { shift(5) }
-                ShiftChip("+200", enabled = shiftRoomForward >= 25) { shift(25) }
-                ShiftChip(
-                    label = if (selecting) "完成" else "选择",
-                    enabled = true,
-                    tint = AccentAmber
-                ) {
-                    selecting = !selecting
-                    if (!selecting) selection = emptySet()
-                }
-            }
-
-            // Block tools: repeat the target presses N times, or drop them.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                Text(
-                    "批量",
-                    fontSize = 9.sp,
-                    fontWeight = FontWeight.Bold,
                     color = TextTertiary,
-                    modifier = Modifier.width(34.dp)
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
                 ShiftChip(
-                    label = "块重复",
-                    enabled = maxCopiesFor(6) >= 2,
-                    tint = AccentCyan
-                ) { showRepeat = true }
-                if (selecting) {
+                    label = if (toolsOpen) "整批 ▴" else "整批 ▾",
+                    enabled = true,
+                    tint = AccentBlue
+                ) { toolsOpen = !toolsOpen }
+            }
+
+            if (toolsOpen) {
+                // Bulk nudge: the whole script by default, only the ticked presses while
+                // 「选择」 is on. Spacing inside the moved group is preserved.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        if (selecting) "已选 ${selection.size}" else "整批",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selecting) AccentBlue else TextTertiary,
+                        modifier = Modifier.width(34.dp)
+                    )
+                    ShiftChip("−200", enabled = shiftRoomBack <= -25) { shift(-25) }
+                    ShiftChip("−40", enabled = shiftRoomBack <= -5) { shift(-5) }
+                    Spacer(Modifier.weight(1f))
+                    ShiftChip("+40", enabled = shiftRoomForward >= 5) { shift(5) }
+                    ShiftChip("+200", enabled = shiftRoomForward >= 25) { shift(25) }
                     ShiftChip(
-                        label = "删除选中",
-                        enabled = selection.isNotEmpty() && selection.size < steps.size,
-                        tint = AccentRed
-                    ) { deleteSelected() }
+                        label = if (selecting) "完成" else "选择",
+                        enabled = true,
+                        tint = AccentAmber
+                    ) {
+                        selecting = !selecting
+                        if (!selecting) selection = emptySet()
+                        toolsOpen = true
+                    }
                 }
-                Spacer(Modifier.weight(1f))
-                Text(
-                    if (selecting) "将处理 ${selection.size}/${steps.size} 段"
-                    else "将处理全部 ${steps.size} 段",
-                    fontSize = 9.sp,
-                    color = if (selecting) AccentBlue else TextTertiary
-                )
+
+                // Block tools: repeat the target presses N times, or drop them.
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        "批量",
+                        fontSize = 9.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextTertiary,
+                        modifier = Modifier.width(34.dp)
+                    )
+                    ShiftChip(
+                        label = "块重复",
+                        enabled = maxCopiesFor(6) >= 2,
+                        tint = AccentCyan
+                    ) { showRepeat = true }
+                    if (selecting) {
+                        ShiftChip(
+                            label = "删除选中",
+                            enabled = selection.isNotEmpty() && selection.size < steps.size,
+                            tint = AccentRed
+                        ) { deleteSelected() }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        if (selecting) "将处理 ${selection.size}/${steps.size} 段"
+                        else "将处理全部 ${steps.size} 段",
+                        fontSize = 9.sp,
+                        color = if (selecting) AccentBlue else TextTertiary
+                    )
+                }
             }
         }
 
@@ -435,10 +483,12 @@ fun MacroEditorScreen(
         ) {
             item {
                 Text(
-                    "每段按压有自己的起点和时长：把 ZL 拉长到 200 ms，再把 X 的起点拖到 48 ms，就是「按住 ZL 的同时按 X」。重叠的几段在手机端合并成同一帧发送。",
-                    fontSize = 10.sp,
+                    "拖动滑块改起点和时长；两段窗口重叠，就是按住一个的同时按另一个。",
+                    fontSize = 9.sp,
                     color = TextTertiary,
-                    lineHeight = 15.sp,
+                    lineHeight = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(bottom = 2.dp)
                 )
             }
@@ -601,10 +651,11 @@ fun MacroEditorScreen(
                 }
             }
             Text(
-                "贴士：短按建议 ≥3 tick（24 ms）；「按住」是一路压着不放，「连击」在同一段时间里按「每下/间隔」的节拍重复点。两段并存的窗口不要同时按同一个键。",
+                "短按建议 ≥3 tick（24 ms）；同一窗口里别重复按同一个键。",
                 fontSize = 9.sp,
                 color = TextTertiary,
-                textAlign = TextAlign.Start
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
     }
