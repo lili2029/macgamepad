@@ -323,19 +323,42 @@ object MacroLibrary {
     )
 
     /**
-     * The classic "Y+B" duplication input: with materials held in the pouch menu,
-     * Y and B have to arrive in the *same* report. Split across two frames the game
-     * reads B (close the menu) and then Y (throw/attack), which is why doing this
-     * with one thumb is so hit-and-miss. Only a single 16 ms frame is held so the
-     * pair cannot be sampled twice after the menu is already gone.
+     * The first take of the duplication script the user actually got working
+     * (3.4 s, 11 presses): ZL held for 520 ms with X / A / START tapped inside it,
+     * then START → X → A×5 → Y+B once, a downward stick flick, an A burst, a second
+     * flick and a second burst.
      *
-     * Works on TotK 1.1.0 / 1.1.1; Nintendo closed it in 1.1.2.
+     * Kept next to [zlACombo] as the "one round" version: the same choreography
+     * without the extra three passes, which is what to fall back to when the game
+     * refuses the second or third dupe.
      */
     val ybDupe = Macro(
         id = "yb_dupe",
         name = "YB 复制",
         steps = listOf(
-            MacroStep(start = 2, ticks = 2, state = InputState(buttonY = true, buttonB = true))
+            MacroStep(start = 0, ticks = 65, state = InputState(leftTrigger = 1f)),
+            MacroStep(start = 31, ticks = 3, state = InputState(buttonX = true)),
+            MacroStep(start = 36, ticks = 3, state = InputState(buttonA = true)),
+            MacroStep(start = 62, ticks = 3, state = InputState(buttonStart = true)),
+            MacroStep(start = 67, ticks = 3, state = InputState(buttonX = true)),
+            MacroStep(
+                start = 73, ticks = 38,
+                state = InputState(buttonA = true),
+                mode = PressMode.TURBO, burstTicks = 6, gapTicks = 2
+            ),
+            MacroStep(start = 114, ticks = 3, state = InputState(buttonB = true, buttonY = true)),
+            MacroStep(start = 138, ticks = 27, state = InputState(leftStickY = 1f)),
+            MacroStep(
+                start = 209, ticks = 70,
+                state = InputState(buttonA = true),
+                mode = PressMode.TURBO, burstTicks = 4, gapTicks = 3
+            ),
+            MacroStep(start = 315, ticks = 27, state = InputState(leftStickY = 1f)),
+            MacroStep(
+                start = 361, ticks = 70,
+                state = InputState(buttonA = true),
+                mode = PressMode.TURBO, burstTicks = 4, gapTicks = 3
+            )
         )
     )
 
