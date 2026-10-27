@@ -39,6 +39,9 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         private const val KEY_PROFILE = "active_profile"
         private const val KEY_MODE = "active_mode"
         private const val KEY_MACRO = "macro_selected"
+        // Where the player was the last time they were using the app, so a
+        // reconnect can land straight back on the pad instead of the dashboard.
+        private const val KEY_LAST_SCREEN = "last_screen"
         // "macro" is a layout element like any other, so the extra button can be
         // dragged, scaled and reset per profile.
         private val LAYOUT_COMPONENTS = listOf("leftStick", "rightStick", "dpad", "abxy", "shoulderL", "shoulderR", "sysButtons", "macro")
@@ -130,6 +133,8 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
     private var wasConnected = false
     /** Set when the player disconnects on purpose; automatic attempts must not undo that. */
     private var optedOut = false
+    /** True between losing the link and getting it back, so the reconnect can restore the pad. */
+    private var awaitingResume = false
 
     // Persistent configuration flows
     private val _sensitivity = MutableStateFlow(prefs.getFloat("pref_sensitivity", 1.0f))
@@ -370,6 +375,7 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         devName: String?,
         error: String?
     ) {
+        val previous = _connectionState.value
         _connectionState.value = connState
         _connectedDeviceName.value = devName
         _errorMessage.value = error
@@ -389,13 +395,24 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
             optedOut = false
         }
 
-        // On connect: jump from Connection screen to Dashboard
-        if (connState == BluetoothGamepadService.ConnectionState.CONNECTED && _currentScreen.value == Screen.CONNECTION) {
-            _currentScreen.value = Screen.DASHBOARD
+        // Land where the player left off. Both a fresh launch (sitting on the
+        // connection screen) and a reconnect after a drop (parked on the dashboard by
+        // the disconnect below) return to the pad if that was the last stop, so
+        // nobody has to tap 「启动」 again.
+        if (connState == BluetoothGamepadService.ConnectionState.CONNECTED) {
+            val parkingSpot = _currentScreen.value == Screen.CONNECTION ||
+                (_currentScreen.value == Screen.DASHBOARD && awaitingResume)
+            if (parkingSpot) goTo(resumeScreen())
+            awaitingResume = false
         }
+
         // On disconnect: return to Connection from Gamepad only (Dashboard/Profile/Settings stay visible)
-        if (connState != BluetoothGamepadService.ConnectionState.CONNECTED && _currentScreen.value == Screen.GAMEPAD) {
-            _currentScreen.value = Screen.DASHBOARD
+        if (connState != BluetoothGamepadService.ConnectionState.CONNECTED) {
+            if (previous == BluetoothGamepadService.ConnectionState.CONNECTED) awaitingResume = true
+            if (_currentScreen.value == Screen.GAMEPAD) {
+                // Not persisted: the player still wants the pad, they just lost the link.
+                _currentScreen.value = Screen.DASHBOARD
+            }
         }
     }
 
@@ -464,7 +481,7 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
 
     fun navigateToGamepad() {
         if (_connectionState.value == BluetoothGamepadService.ConnectionState.CONNECTED) {
-            _currentScreen.value = Screen.GAMEPAD
+            goTo(Screen.GAMEPAD)
         }
     }
 
@@ -472,10 +489,26 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         // Walking away mid-take saves it rather than throwing it away: the player
         // can review it from the macro list, and nothing is silently lost.
         if (_isRecording.value) finishRecording()
-        _currentScreen.value = Screen.DASHBOARD
+        goTo(Screen.DASHBOARD)
     }
     fun navigateToProfile()   { _currentScreen.value = Screen.PROFILE   }
     fun navigateToSettings()  { _currentScreen.value = Screen.SETTINGS  }
+
+    /**
+     * Screen changes that the user asked for are remembered, so the next connection
+     * can drop them back on the pad instead of making them tap 「启动」 every time.
+     */
+    private fun goTo(screen: Screen) {
+        _currentScreen.value = screen
+        if (screen == Screen.GAMEPAD || screen == Screen.DASHBOARD) {
+            prefs.edit().putString(KEY_LAST_SCREEN, screen.name).apply()
+        }
+    }
+
+    /** Where a fresh connection lands: the pad if that was the last stop, else the dashboard. */
+    private fun resumeScreen(): Screen =
+        if (prefs.getString(KEY_LAST_SCREEN, Screen.DASHBOARD.name) == Screen.GAMEPAD.name) Screen.GAMEPAD
+        else Screen.DASHBOARD
 
     fun setSensitivity(value: Float) {
         _sensitivity.value = value
@@ -530,9 +563,9 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
     fun setLayoutEditMode(enabled: Boolean) {
         _isLayoutEditMode.value = enabled
         if (enabled) {
-            _currentScreen.value = Screen.GAMEPAD
+            goTo(Screen.GAMEPAD)
         } else {
-            _currentScreen.value = Screen.DASHBOARD
+            goTo(Screen.DASHBOARD)
         }
     }
 
