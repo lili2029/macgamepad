@@ -117,6 +117,25 @@ fun MacroEditorScreen(
         applySteps(list, sort)
     }
 
+    val firstStart = steps.minOfOrNull { it.start } ?: 0
+    val lastEnd = steps.maxOfOrNull { it.end } ?: 0
+    // How far the whole script can still slide before a press would fall off either
+    // end. Clamping the delta instead of each press keeps the spacing intact.
+    val shiftRoomBack = -firstStart
+    val shiftRoomForward = MacroStore.MAX_START - lastEnd
+
+    /**
+     * Moves every press by [deltaTicks]. This is the "make it all a bit later" knob:
+     * the internal choreography is untouched, only the script's start on the clock
+     * moves, so a macro that needs a longer lead-in does not have to be rebuilt by
+     * dragging a dozen rows.
+     */
+    fun shiftAll(deltaTicks: Int) {
+        val delta = deltaTicks.coerceAtLeast(shiftRoomBack).coerceAtMost(shiftRoomForward)
+        if (delta == 0) return
+        applySteps(steps.map { it.copy(start = it.start + delta) })
+    }
+
     val maxEnd = draft.totalTicks
     // Upper end of the "when does this press start" slider. It only ever grows, so
     // dragging a long hold later cannot rescale the thumb under the finger.
@@ -254,6 +273,20 @@ fun MacroEditorScreen(
                     color = TextTertiary
                 )
                 Text("${draft.durationMs} ms", fontSize = 9.sp, color = TextTertiary)
+            }
+
+            // Whole-script nudge: everything shifts together, spacing preserved.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text("整批", fontSize = 9.sp, color = TextTertiary)
+                ShiftChip("−200", enabled = shiftRoomBack <= -25) { shiftAll(-25) }
+                ShiftChip("−40", enabled = shiftRoomBack <= -5) { shiftAll(-5) }
+                Spacer(Modifier.weight(1f))
+                ShiftChip("+40", enabled = shiftRoomForward >= 5) { shiftAll(5) }
+                ShiftChip("+200", enabled = shiftRoomForward >= 25) { shiftAll(25) }
             }
         }
 
@@ -916,6 +949,31 @@ private fun RowScope.AddStepButton(label: String, icon: ImageVector, onClick: ()
             Icon(icon, null, tint = AccentBlue, modifier = Modifier.size(13.dp))
             Text(label, fontSize = 11.sp, fontWeight = FontWeight.Medium, color = AccentBlue)
         }
+    }
+}
+
+/** One nudge button of the whole-script shift rail (−200 / −40 / +40 / +200 ms). */
+@Composable
+private fun ShiftChip(label: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (enabled) AccentBlue.copy(alpha = 0.12f) else Bg3)
+            .border(
+                1.dp,
+                if (enabled) AccentBlue.copy(alpha = 0.42f) else BorderSubtle,
+                RoundedCornerShape(8.dp)
+            )
+            .clickable(enabled = enabled) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            label,
+            fontSize = 10.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (enabled) AccentBlue else TextTertiary
+        )
     }
 }
 
