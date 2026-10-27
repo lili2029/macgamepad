@@ -73,13 +73,18 @@ data class MacroStep(
  * @param steps the presses; several may overlap, and gaps between them are just
  *        clock time with nothing pressed — no filler steps needed.
  * @param cooldownTicks trailing frames sent with nothing pressed, so a report that
- *        arrives out of order can never leave a button stuck down.
+ *        arrives out of order can never leave a button stuck down. In [loop] mode
+ *        these are also the breath between two rounds.
+ * @param loop replay the script over and over until the player taps the macro
+ *        button again. The trailing cooldown is what separates the rounds, so a
+ *        looping macro cannot machine-gun the same press without a frame of air.
  */
 data class Macro(
     val id: String,
     val name: String,
     val steps: List<MacroStep>,
-    val cooldownTicks: Int = 4
+    val cooldownTicks: Int = 4,
+    val loop: Boolean = false
 ) {
     init {
         require(steps.isNotEmpty()) { "a macro needs at least one press" }
@@ -172,19 +177,26 @@ class MacroPlayer {
 
     @Volatile private var macro: Macro? = null
     @Volatile private var tick: Int = 0
+    /** How many rounds of a looping macro have finished, for the UI and the log. */
+    @Volatile private var rounds: Int = 0
 
     val isRunning: Boolean get() = macro != null
 
     val runningId: String? get() = macro?.id
 
+    /** Rounds completed since [start]; always 0 for a one-shot macro. */
+    val completedRounds: Int get() = rounds
+
     fun start(macro: Macro) {
         tick = 0
+        rounds = 0
         this.macro = macro
     }
 
     fun cancel() {
         macro = null
         tick = 0
+        rounds = 0
     }
 
     /**
@@ -194,13 +206,24 @@ class MacroPlayer {
      */
     fun currentFrame(): InputState? = macro?.overlayAt(tick)
 
-    /** Advance one tick. Returns false once the macro (and its cooldown) is over. */
+    /**
+     * Advance one tick. Returns false once the macro (and its cooldown) is over.
+     *
+     * A looping macro never ends by itself: at the end of the cooldown it rewinds to
+     * tick 0 and runs again, which is why the caller must keep offering frames until
+     * the player stops it (or the session drops).
+     */
     fun advance(): Boolean {
         val m = macro ?: return false
         val next = tick + 1
         if (next >= m.totalTicks + m.cooldownTicks) {
-            cancel()
-            return false
+            if (!m.loop) {
+                cancel()
+                return false
+            }
+            tick = 0
+            rounds++
+            return true
         }
         tick = next
         return true

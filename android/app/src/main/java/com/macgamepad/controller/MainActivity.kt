@@ -228,6 +228,7 @@ class MainActivity : ComponentActivity() {
                             val macroList by vm.macros.collectAsState()
                             val recording by vm.isRecording.collectAsState()
                             val recordStats by vm.recordingStats.collectAsState()
+                            val runningMacro by vm.runningMacroId.collectAsState()
 
                             GamepadScreen(
                                 profileId = activeProfileId,
@@ -250,11 +251,14 @@ class MainActivity : ComponentActivity() {
                                 onTouchpadClick = { vm.onTouchpadClick() },
                                 onMacroTriggered = { vm.triggerMacro() },
                                 macroName = macroList.firstOrNull { it.id == macroId }?.name ?: "宏",
+                                macroLoop = macroList.firstOrNull { it.id == macroId }?.loop == true,
+                                isMacroRunning = runningMacro == macroId,
                                 macros = macroList,
                                 selectedMacroId = macroId,
                                 onMacroSelected = { vm.setSelectedMacro(it) },
                                 onEditMacro = { vm.openMacroEditor(it) },
                                 onDeleteMacro = { vm.deleteMacro(it) },
+                                onSetMacroLoop = { id, loop -> vm.setMacroLoop(id, loop) },
                                 isRecording = recording,
                                 recordingMs = recordStats.durationMs,
                                 recordingSteps = recordStats.steps,

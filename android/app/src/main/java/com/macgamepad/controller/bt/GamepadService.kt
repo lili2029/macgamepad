@@ -83,6 +83,14 @@ class GamepadService : Service(), SensorEventListener {
     private val macroPlayer = MacroPlayer()
 
     /**
+     * Which macro the button is currently replaying, or null when idle. The pad
+     * screen needs this to turn the button into a stop button while a looping take
+     * runs — a loop has no natural end, so "is it still going?" cannot be guessed.
+     */
+    private val _runningMacroId = MutableStateFlow<String?>(null)
+    val runningMacroId: StateFlow<String?> = _runningMacroId.asStateFlow()
+
+    /**
      * Samples what the host is being told, one tick at a time, so a macro can be
      * built by playing it instead of by hand. Owned by the same loop as [macroPlayer].
      */
@@ -223,6 +231,9 @@ class GamepadService : Service(), SensorEventListener {
     /**
      * Start replaying [macro]. Ignored unless a gamepad session is actually live,
      * so a stray tap on the macro button can't queue something for later.
+     *
+     * A looping macro is a toggle: tapping the button again stops it. A one-shot one
+     * restarts, which is what a player re-tapping a short script expects.
      */
     fun triggerMacro(macro: Macro) {
         if (_mode.value != Mode.GAMEPAD) {
@@ -233,8 +244,18 @@ class GamepadService : Service(), SensorEventListener {
             Log.i(TAG, "Macro ignored: not connected")
             return
         }
+        if (macro.loop && macroPlayer.isRunning && macroPlayer.runningId == macro.id) {
+            Log.i(TAG, "Macro loop stopped by the player: ${macro.id}")
+            stopMacro()
+            return
+        }
         macroPlayer.start(macro)
-        Log.i(TAG, "Macro started: ${macro.id}, ${macro.totalTicks} ticks (${macro.durationMs} ms)")
+        _runningMacroId.value = macro.id
+        Log.i(
+            TAG,
+            "Macro started: ${macro.id}${if (macro.loop) " (loop)" else ""}, " +
+                "${macro.totalTicks} ticks (${macro.durationMs} ms)"
+        )
         // Send the first frame now instead of waiting up to 8 ms for the loop.
         sendMergedReport(currentInputState)
     }
@@ -242,8 +263,19 @@ class GamepadService : Service(), SensorEventListener {
     fun cancelMacro() {
         if (macroPlayer.isRunning) {
             Log.i(TAG, "Macro cancelled: ${macroPlayer.runningId}")
-            macroPlayer.cancel()
+            stopMacro()
         }
+    }
+
+    /**
+     * Drops the replay and pushes the player's own input straight away, so stopping
+     * a looping macro cannot leave its last frame's buttons held on the host.
+     */
+    private fun stopMacro() {
+        macroPlayer.cancel()
+        _runningMacroId.value = null
+        btService.sendReport(currentInputState)
+        lastSentState = currentInputState
     }
 
     // ================================================================
@@ -403,6 +435,7 @@ class GamepadService : Service(), SensorEventListener {
                                     // The macro ended; its cooldown already sent a blank frame,
                                     // but one more plain report guarantees nothing is left held
                                     // even if a Bluetooth report was dropped.
+                                    _runningMacroId.value = null
                                     btService.sendReport(currentInputState)
                                     lastSentState = currentInputState
                                     heartbeatCount = 0
@@ -463,6 +496,7 @@ class GamepadService : Service(), SensorEventListener {
         serviceJob = null
         // Never leave a macro half-played: the next session starts from a clean slate.
         macroPlayer.cancel()
+        _runningMacroId.value = null
         // A recording belongs to the session it was started in.
         if (macroRecorder.isRecording) {
             macroRecorder.cancel()

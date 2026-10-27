@@ -174,11 +174,16 @@ fun GamepadScreen(
     onMacroTriggered: () -> Unit = {},
     onMacroLongPress: () -> Unit = {},
     macroName: String = "宏",
+    /** True when the selected macro replays until it is stopped by hand. */
+    macroLoop: Boolean = false,
+    /** True while that macro is being replayed right now. */
+    isMacroRunning: Boolean = false,
     macros: List<Macro> = emptyList(),
     selectedMacroId: String? = null,
     onMacroSelected: (String) -> Unit = {},
     onEditMacro: (String?) -> Unit = {},
     onDeleteMacro: (String) -> Unit = {},
+    onSetMacroLoop: (String, Boolean) -> Unit = { _, _ -> },
     // Recording: the macro button doubles as the stop button while a take is running.
     isRecording: Boolean = false,
     recordingMs: Int = 0,
@@ -723,13 +728,17 @@ fun GamepadScreen(
                 }
             }
             // Recording borrows the button: red, showing the elapsed time, tap = stop.
+            // A looping macro borrows it too: filled, saying 「停止」, because a loop
+            // never ends on its own and the only way out is another tap.
+            val looping = isMacroRunning && macroLoop
+            val running = isMacroRunning
             val lit = if (isRecording) Color(0xFFE0453F) else skin.accent
             Box(
                 modifier = Modifier
                     .size(108.dp, 38.dp)
                     .clip(RoundedCornerShape(19.dp))
                     .background(
-                        if (firing || isRecording) {
+                        if (firing || isRecording || running) {
                             Brush.linearGradient(listOf(lit, lit.copy(alpha = 0.55f)))
                         } else {
                             Brush.linearGradient(listOf(Color(0xFF16203A), Color(0xFF0A0F1E)))
@@ -737,7 +746,7 @@ fun GamepadScreen(
                     )
                     .border(
                         1.dp,
-                        lit.copy(alpha = if (firing || isRecording) 0.95f else 0.35f),
+                        lit.copy(alpha = if (firing || isRecording || running) 0.95f else 0.35f),
                         RoundedCornerShape(19.dp)
                     )
                     .pointerInput(isEditMode, isRecording) {
@@ -770,14 +779,22 @@ fun GamepadScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Icon(
-                        imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        imageVector = when {
+                            isRecording || looping -> Icons.Default.Stop
+                            macroLoop -> Icons.Default.Refresh
+                            else -> Icons.Default.PlayArrow
+                        },
                         contentDescription = null,
-                        tint = if (firing || isRecording) Color.Black else skin.accent,
+                        tint = if (firing || isRecording || running) Color.Black else skin.accent,
                         modifier = Modifier.size(13.dp)
                     )
                     Text(
-                        text = if (isRecording) String.format(Locale.US, "%.1fs", recordingMs / 1000f) else macroName,
-                        color = if (firing || isRecording) Color.Black else skin.accent,
+                        text = when {
+                            isRecording -> String.format(Locale.US, "%.1fs", recordingMs / 1000f)
+                            looping -> "停止"
+                            else -> macroName
+                        },
+                        color = if (firing || isRecording || running) Color.Black else skin.accent,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1,
@@ -824,6 +841,7 @@ fun GamepadScreen(
                     onStartRecording()
                 },
                 onDelete = { id -> onDeleteMacro(id) },
+                onSetLoop = { id, loop -> onSetMacroLoop(id, loop) },
                 onDismiss = { showMacroPicker = false }
             )
         }
@@ -924,6 +942,7 @@ private fun MacroPickerDialog(
     onEdit: (String?) -> Unit,
     onRecord: () -> Unit,
     onDelete: (String) -> Unit,
+    onSetLoop: (String, Boolean) -> Unit,
     onDismiss: () -> Unit
 ) {
     // 「编辑」turns the list into a manage list: every row grows a trash can, and
@@ -1013,6 +1032,7 @@ private fun MacroPickerDialog(
                                     confirming = pendingDelete == m.id,
                                     onSelect = { onSelect(m.id) },
                                     onEdit = { onEdit(m.id) },
+                                    onToggleLoop = { onSetLoop(m.id, !m.loop) },
                                     onAskDelete = { pendingDelete = m.id },
                                     onCancelDelete = { pendingDelete = null },
                                     onConfirmDelete = {
@@ -1086,6 +1106,7 @@ private fun MacroRow(
     confirming: Boolean,
     onSelect: () -> Unit,
     onEdit: () -> Unit,
+    onToggleLoop: () -> Unit,
     onAskDelete: () -> Unit,
     onCancelDelete: () -> Unit,
     onConfirmDelete: () -> Unit
@@ -1155,6 +1176,29 @@ private fun MacroRow(
                 color = TextTertiary,
                 maxLines = 1
             )
+            // 「循环」is a property of the take, not of the button, so it sits on the
+            // row: tap it and this macro plays until it is stopped by hand.
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(7.dp))
+                    .background(if (macro.loop) accent.copy(alpha = 0.22f) else Color.Transparent)
+                    .border(
+                        1.dp,
+                        if (macro.loop) accent.copy(alpha = 0.7f) else BorderSubtle,
+                        RoundedCornerShape(7.dp)
+                    )
+                    .clickable { onToggleLoop() }
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    "循环",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (macro.loop) accent else TextTertiary,
+                    maxLines = 1
+                )
+            }
             if (selected) {
                 Icon(Icons.Default.Check, null, tint = accent, modifier = Modifier.size(14.dp))
             }

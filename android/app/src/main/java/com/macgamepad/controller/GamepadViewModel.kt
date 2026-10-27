@@ -197,6 +197,9 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         recordingJob = null
         _isRecording.value = false
         _recordingStats.value = MacroRecorder.Stats()
+        _runningMacroId.value = service?.runningMacroId?.value
+        playbackJob?.cancel()
+        playbackJob = null
         if (service != null) {
             Log.i(TAG, "Service reference acquired by ViewModel")
             _connectionState.value = service.btService.connectionState.value
@@ -213,6 +216,7 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
             service.updatePreferences(_sensitivity.value, _deadZone.value, _gyroEnabled.value)
             updateTargetDeviceName()
             observeRecording(service)
+            observeMacroPlayback(service)
 
             _lastHostName.value = service.btService.lastHostName
             maybeAutoConnectOnLaunch(service)
@@ -355,6 +359,14 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
                     finishRecording()
                 }
             }
+        }
+    }
+
+    /** Mirrors "is a macro playing" into the ViewModel so the pad screen can react. */
+    private fun observeMacroPlayback(service: GamepadService) {
+        playbackJob?.cancel()
+        playbackJob = viewModelScope.launch {
+            service.runningMacroId.collect { id -> _runningMacroId.value = id }
         }
     }
 
@@ -739,12 +751,32 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
 
     fun triggerMacro() {
         val macro = selectedMacro()
-        Log.i(TAG, "Macro button: ${macro.id}")
+        Log.i(TAG, "Macro button: ${macro.id}${if (macro.loop) " (loop)" else ""}")
         _gamepadService.value?.triggerMacro(macro)
     }
 
     fun cancelMacro() {
         _gamepadService.value?.cancelMacro()
+    }
+
+    /** Id of the macro being replayed right now, so the pad can show a stop state. */
+    private val _runningMacroId = MutableStateFlow<String?>(null)
+    val runningMacroId: StateFlow<String?> = _runningMacroId.asStateFlow()
+    private var playbackJob: Job? = null
+
+    /**
+     * Turns the "play it over and over" flag on for one macro. Stored with the macro
+     * rather than with the button, so a looping take stays looping the next time it
+     * is picked.
+     */
+    fun setMacroLoop(macroId: String, loop: Boolean) {
+        val macro = _macros.value.firstOrNull { it.id == macroId } ?: return
+        if (macro.loop == loop) return
+        // A one-shot run already in flight must not survive a switch to "loop", and
+        // a loop that is stopped by this call has to release what it was holding.
+        if (!loop && _runningMacroId.value == macroId) _gamepadService.value?.cancelMacro()
+        _macros.value = macroStore.save(macro.copy(loop = loop))
+        Log.i(TAG, "Macro loop = $loop: $macroId")
     }
 
     // ================================================================

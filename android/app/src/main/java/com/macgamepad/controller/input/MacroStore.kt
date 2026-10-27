@@ -321,7 +321,8 @@ class MacroStore(private val prefs: SharedPreferences) {
             id = id,
             name = name,
             steps = steps.sortedWith(compareBy({ it.start }, { it.end })),
-            cooldownTicks = from?.cooldownTicks ?: 4
+            cooldownTicks = from?.cooldownTicks ?: 4,
+            loop = from?.loop ?: false
         )
     }
 
@@ -332,6 +333,8 @@ class MacroStore(private val prefs: SharedPreferences) {
         o.put("id", macro.id)
         o.put("name", macro.name)
         o.put("c", macro.cooldownTicks)
+        // Only a looping macro pays for the flag; one-shots stay as they were.
+        if (macro.loop) o.put("lp", true)
         val steps = JSONArray()
         macro.steps.forEach { step ->
             val o = JSONObject()
@@ -385,7 +388,8 @@ class MacroStore(private val prefs: SharedPreferences) {
                 id = id,
                 name = name,
                 steps = steps.sortedWith(compareBy({ it.start }, { it.end })),
-                cooldownTicks = cooldown
+                cooldownTicks = cooldown,
+                loop = o.optBoolean("lp", false)
             )
         } catch (e: IllegalArgumentException) {
             Log.w(TAG, "dropping unreadable macro $id", e)
