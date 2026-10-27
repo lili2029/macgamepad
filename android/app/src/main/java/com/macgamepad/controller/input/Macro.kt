@@ -259,12 +259,45 @@ object MacroLibrary {
     const val DEFAULT_ID = "zl_a_combo"
 
     /**
-     * The take the user settled on as the factory default (3.4 s, 11 presses): ZL
-     * held for 520 ms while X / A / START are tapped inside it, an A burst, the
-     * same-frame Y+B dupe chord, two downward stick flicks with A bursts between
-     * them. The opening hold is deliberately 200 ms longer than the original take
-     * and everything after it sits 200 ms later, so the choreography inside the
-     * hold is unchanged while the hold itself lasts long enough to read.
+     * One round of the duplication input: START, X, an A mash, then the same-frame
+     * Y+B dupe chord. Offsets are relative to the round's own start so [dupRounds]
+     * can stamp as many of them as the chain needs.
+     */
+    private val dupRound = listOf(
+        MacroStep(start = 0, ticks = 3, state = InputState(buttonStart = true)),
+        MacroStep(start = 5, ticks = 3, state = InputState(buttonX = true)),
+        MacroStep(
+            start = 11, ticks = 38,
+            state = InputState(buttonA = true),
+            mode = PressMode.TURBO, burstTicks = 6, gapTicks = 2
+        ),
+        MacroStep(start = 52, ticks = 3, state = InputState(buttonB = true, buttonY = true))
+    )
+
+    /** How long one [dupRound] occupies, in ticks: the START press to the Y+B release. */
+    private const val DUP_ROUND_TICKS = 55
+
+    /**
+     * Stamps [times] copies of [dupRound] onto the clock from [base], [gap] ticks of
+     * silence between two rounds. 8 ms ticks, so a "50 ms" gap is really 48 ms.
+     */
+    private fun dupRounds(times: Int, gap: Int = 6, base: Int = 62): List<MacroStep> {
+        val stride = DUP_ROUND_TICKS + gap
+        return (0 until times).flatMap { round ->
+            dupRound.map { it.copy(start = base + round * stride + it.start) }
+        }
+    }
+
+    /**
+     * The take the user settled on as the factory default (4.9 s, 23 presses): ZL
+     * held for 520 ms while X / A / START are tapped inside it, then the START → X →
+     * A×5 → Y+B round played four times, 48 ms apart, a stick flick, an A burst, a
+     * second flick and a second burst.
+     *
+     * The round is stamped rather than hand-listed so the spacing inside it stays
+     * identical from copy to copy — the game only cares that the Y+B pair lands in
+     * one report, not that a human counted the gaps. Only the first round sits
+     * inside the ZL hold; the three repeats run without it.
      */
     val zlACombo = Macro(
         id = "zl_a_combo",
@@ -272,24 +305,17 @@ object MacroLibrary {
         steps = listOf(
             MacroStep(start = 0, ticks = 65, state = InputState(leftTrigger = 1f)),
             MacroStep(start = 31, ticks = 3, state = InputState(buttonX = true)),
-            MacroStep(start = 36, ticks = 3, state = InputState(buttonA = true)),
-            MacroStep(start = 62, ticks = 3, state = InputState(buttonStart = true)),
-            MacroStep(start = 67, ticks = 3, state = InputState(buttonX = true)),
+            MacroStep(start = 36, ticks = 3, state = InputState(buttonA = true))
+        ) + dupRounds(times = 4) + listOf(
+            MacroStep(start = 321, ticks = 27, state = InputState(leftStickY = 1f)),
             MacroStep(
-                start = 73, ticks = 38,
-                state = InputState(buttonA = true),
-                mode = PressMode.TURBO, burstTicks = 6, gapTicks = 2
-            ),
-            MacroStep(start = 114, ticks = 3, state = InputState(buttonB = true, buttonY = true)),
-            MacroStep(start = 138, ticks = 27, state = InputState(leftStickY = 1f)),
-            MacroStep(
-                start = 209, ticks = 70,
+                start = 392, ticks = 70,
                 state = InputState(buttonA = true),
                 mode = PressMode.TURBO, burstTicks = 4, gapTicks = 3
             ),
-            MacroStep(start = 315, ticks = 27, state = InputState(leftStickY = 1f)),
+            MacroStep(start = 498, ticks = 27, state = InputState(leftStickY = 1f)),
             MacroStep(
-                start = 361, ticks = 70,
+                start = 544, ticks = 70,
                 state = InputState(buttonA = true),
                 mode = PressMode.TURBO, burstTicks = 4, gapTicks = 3
             )

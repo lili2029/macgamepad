@@ -155,6 +155,70 @@ fun MacroEditorScreen(
         selection = if (index in selection) selection - index else selection + index
     }
 
+    // ── Repeat a block ────────────────────────────────────────────────────
+    var showRepeat by remember(macro.id) { mutableStateOf(false) }
+
+    /** The presses a repeat would copy: the ticked ones, or the whole script. */
+    val blockSteps = targetSteps
+    val blockBase = blockSteps.minOfOrNull { it.start } ?: 0
+    val blockSpan = (blockSteps.maxOfOrNull { it.end } ?: 0) - blockBase
+    val blockEnd = steps.maxOfOrNull { it.end } ?: 0
+
+    /**
+     * How many copies fit for a given gap: limited by the 80-press budget and by the
+     * clock, because the copies push everything behind them towards the 19.2 s end.
+     */
+    fun maxCopiesFor(gapTicks: Int): Int {
+        val size = blockSteps.size
+        if (size == 0 || blockSpan <= 0) return 0
+        val stride = blockSpan + gapTicks
+        val byCount = (MacroStore.MAX_STEPS - steps.size) / size + 1
+        val byClock = (MacroStore.MAX_START - blockEnd) / stride + 1
+        return minOf(byCount, byClock).coerceAtMost(8)
+    }
+
+    /**
+     * Repeats the target presses as one block: copy 1 stays where it is, copies 2..N
+     * follow one block-length plus [gapTicks] of air apart, and whatever used to
+     * start at or after the block's end slides back by the room the copies take.
+     *
+     * This is the "play these four presses three more times" case, which used to
+     * mean duplicating twelve rows by hand and dragging every one of them.
+     */
+    fun repeatBlock(times: Int, gapTicks: Int) {
+        val picked = targets ?: return
+        val group = steps.filterIndexed { i, _ -> i in picked }
+        if (group.isEmpty() || times < 2) return
+        val base = group.minOf { it.start }
+        val span = group.maxOf { it.end } - base
+        if (span <= 0) return
+        val extra = times - 1
+        val stride = span + gapTicks
+        if (steps.size + extra * group.size > MacroStore.MAX_STEPS) return
+        if (steps.maxOf { it.end } + extra * stride > MacroStore.MAX_START) return
+
+        val tail = steps.map { step ->
+            if (step.start >= base + span) step.copy(start = step.start + extra * stride) else step
+        }
+        val copies = (1..extra).flatMap { k -> group.map { it.copy(start = it.start + stride * k) } }
+        applySteps(tail + copies)
+        // The old ticks no longer describe the same rows, so drop them rather than
+        // leave a selection that points at freshly inserted copies.
+        if (selecting) {
+            selecting = false
+            selection = emptySet()
+        }
+    }
+
+    /** Removes the ticked rows in one go — the counterpart of repeating them. */
+    fun deleteSelected() {
+        if (selection.isEmpty()) return
+        val kept = steps.filterIndexed { i, _ -> i !in selection }
+        if (kept.isEmpty()) return
+        applySteps(kept)
+        selection = emptySet()
+    }
+
     val maxEnd = draft.totalTicks
     // Upper end of the "when does this press start" slider. It only ever grows, so
     // dragging a long hold later cannot rescale the thumb under the finger.
@@ -322,6 +386,40 @@ fun MacroEditorScreen(
                     selecting = !selecting
                     if (!selecting) selection = emptySet()
                 }
+            }
+
+            // Block tools: repeat the target presses N times, or drop them.
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(
+                    "批量",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextTertiary,
+                    modifier = Modifier.width(34.dp)
+                )
+                ShiftChip(
+                    label = "块重复",
+                    enabled = maxCopiesFor(6) >= 2,
+                    tint = AccentCyan
+                ) { showRepeat = true }
+                if (selecting) {
+                    ShiftChip(
+                        label = "删除选中",
+                        enabled = selection.isNotEmpty() && selection.size < steps.size,
+                        tint = AccentRed
+                    ) { deleteSelected() }
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    if (selecting) "将处理 ${selection.size}/${steps.size} 段"
+                    else "将处理全部 ${steps.size} 段",
+                    fontSize = 9.sp,
+                    color = if (selecting) AccentBlue else TextTertiary
+                )
             }
         }
 
@@ -521,6 +619,20 @@ fun MacroEditorScreen(
             onToggle = { key -> updateStep(pickerIndex) { it.copy(state = MacroKeys.toggle(it.state, key)) } },
             onClear = { updateStep(pickerIndex) { it.copy(state = InputState()) } },
             onDone = { pickerIndex = -1 }
+        )
+    }
+
+    if (showRepeat) {
+        RepeatBlockDialog(
+            blockCount = blockSteps.size,
+            blockMs = blockSpan * Macro.TICK_MS,
+            allSteps = !selecting,
+            maxCopiesFor = { maxCopiesFor(it) },
+            onDismiss = { showRepeat = false },
+            onConfirm = { times, gapTicks ->
+                repeatBlock(times, gapTicks)
+                showRepeat = false
+            }
         )
     }
 
@@ -971,6 +1083,166 @@ private fun KeyPickerDialog(
             TextButton(onClick = onClear) { Text("清空", color = TextSecondary) }
         }
     )
+}
+
+// ══════════════════════════════════════════════════════════════════════════
+// Block repeat
+// ══════════════════════════════════════════════════════════════════════════
+
+/**
+ * "Play this stretch again N times, M ms apart."
+ *
+ * The copies are real presses on the same clock rather than a loop count, because
+ * the sending side only knows how to read a timeline — and because the user can
+ * still go and edit one copy without touching the others.
+ */
+@Composable
+private fun RepeatBlockDialog(
+    blockCount: Int,
+    blockMs: Int,
+    allSteps: Boolean,
+    maxCopiesFor: (Int) -> Int,
+    onDismiss: () -> Unit,
+    onConfirm: (times: Int, gapTicks: Int) -> Unit
+) {
+    var wanted by remember { mutableStateOf(4) }
+    var gapTicks by remember { mutableStateOf(6) }
+
+    val cap = maxCopiesFor(gapTicks)
+    val times = wanted.coerceIn(2, maxOf(2, cap))
+    val fitted = cap >= 2
+
+    val stride = blockMs + gapTicks * Macro.TICK_MS
+    val totalMs = blockMs + (times - 1) * stride
+    val pushMs = (times - 1) * stride
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Bg2,
+        tonalElevation = 0.dp,
+        title = {
+            Column {
+                Text("把这段重复几次", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
+                Text(
+                    if (allSteps) "范围：全部 $blockCount 段（想只重复一部分就先点「选择」）"
+                    else "范围：选中的 $blockCount 段 · 原长 $blockMs ms",
+                    fontSize = 10.sp,
+                    color = if (allSteps) AccentAmber else AccentBlue,
+                    lineHeight = 14.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                RepeatStepper(
+                    label = "次数",
+                    value = "×$times",
+                    canDown = fitted && times > 2,
+                    canUp = fitted && times < cap,
+                    onDown = { wanted = times - 1 },
+                    onUp = { wanted = times + 1 }
+                )
+                RepeatStepper(
+                    label = "间隔",
+                    value = "${gapTicks * Macro.TICK_MS} ms",
+                    canDown = gapTicks > 0,
+                    canUp = gapTicks < 40,
+                    onDown = { gapTicks-- },
+                    onUp = { gapTicks++ }
+                )
+                if (fitted) {
+                    Text(
+                        "共 $times 遍、占 $totalMs ms；这段后面的按压会整体往后让 $pushMs ms。" +
+                            if (cap in 2..7) "（这样最多 ×$cap）" else "",
+                        fontSize = 10.sp,
+                        color = TextSecondary,
+                        lineHeight = 14.sp
+                    )
+                } else {
+                    Text(
+                        "放不下了：段数或时间轴已到上限，把间隔调小一点再试。",
+                        fontSize = 10.sp,
+                        color = AccentAmber,
+                        lineHeight = 14.sp
+                    )
+                }
+                Text(
+                    "时间按 8 ms 一格，50 ms 会落到 48 ms。间隔 0 就是紧贴着再来一遍。",
+                    fontSize = 9.sp,
+                    color = TextTertiary,
+                    lineHeight = 13.sp
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onConfirm(times, gapTicks) }, enabled = fitted) {
+                Text(
+                    "重复",
+                    color = if (fitted) AccentCyan else TextTertiary,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消", color = TextSecondary) }
+        }
+    )
+}
+
+@Composable
+private fun RepeatStepper(
+    label: String,
+    value: String,
+    canDown: Boolean,
+    canUp: Boolean,
+    onDown: () -> Unit,
+    onUp: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(label, fontSize = 11.sp, color = TextSecondary, modifier = Modifier.width(32.dp))
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Bg3)
+                .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp))
+                .padding(vertical = 6.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(value, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+        }
+        StepperButton("−", canDown, onDown)
+        StepperButton("+", canUp, onUp)
+    }
+}
+
+@Composable
+private fun StepperButton(sign: String, enabled: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (enabled) AccentCyan.copy(alpha = 0.14f) else Bg3)
+            .border(
+                1.dp,
+                if (enabled) AccentCyan.copy(alpha = 0.45f) else BorderSubtle,
+                RoundedCornerShape(8.dp)
+            )
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            sign,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (enabled) AccentCyan else TextTertiary
+        )
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════
