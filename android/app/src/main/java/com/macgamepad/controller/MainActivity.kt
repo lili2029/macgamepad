@@ -254,6 +254,7 @@ class MainActivity : ComponentActivity() {
                                 selectedMacroId = macroId,
                                 onMacroSelected = { vm.setSelectedMacro(it) },
                                 onEditMacro = { vm.openMacroEditor(it) },
+                                onDeleteMacro = { vm.deleteMacro(it) },
                                 isRecording = recording,
                                 recordingMs = recordStats.durationMs,
                                 recordingSteps = recordStats.steps,

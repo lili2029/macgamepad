@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
@@ -39,6 +40,7 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.macgamepad.controller.input.InputState
 import com.macgamepad.controller.input.Macro
+import com.macgamepad.controller.input.MacroLibrary
 import com.macgamepad.controller.ui.components.*
 import com.macgamepad.controller.ui.theme.*
 import kotlinx.coroutines.delay
@@ -176,6 +178,7 @@ fun GamepadScreen(
     selectedMacroId: String? = null,
     onMacroSelected: (String) -> Unit = {},
     onEditMacro: (String?) -> Unit = {},
+    onDeleteMacro: (String) -> Unit = {},
     // Recording: the macro button doubles as the stop button while a take is running.
     isRecording: Boolean = false,
     recordingMs: Int = 0,
@@ -820,6 +823,7 @@ fun GamepadScreen(
                     showMacroPicker = false
                     onStartRecording()
                 },
+                onDelete = { id -> onDeleteMacro(id) },
                 onDismiss = { showMacroPicker = false }
             )
         }
@@ -903,14 +907,13 @@ fun GamepadScreen(
 // Macro picker
 //
 // Long-pressing the macro button opens this instead of silently cycling: the
-// player gets to see what each script does (step count and length) and can jump
-// straight into the editor. The HID side is unaffected either way.
+// player gets to see what each script does and can jump straight into the editor.
 //
 // A plain AlertDialog wasted the screen: its title block and button row are fixed
 // heights, so with a dozen macros the list itself only showed two and a half rows.
-// This dialog is a plain sheet pinned to 90% of the window height instead — the
-// header and footer are two thin rows and everything in between belongs to the
-// list, which is the part worth scrolling.
+// This is a plain sheet whose header and footer are single thin rows and everything
+// in between belongs to the list. Record, new and manage all share one footer row,
+// which buys the list the whole middle of the screen.
 // ─────────────────────────────────────────────────────────────────────────────
 @Composable
 private fun MacroPickerDialog(
@@ -920,220 +923,318 @@ private fun MacroPickerDialog(
     onSelect: (String) -> Unit,
     onEdit: (String?) -> Unit,
     onRecord: () -> Unit,
+    onDelete: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    // 「编辑」turns the list into a manage list: every row grows a trash can, and
+    // tapping it swaps that row for an inline confirmation. Nothing disappears on a
+    // single touch, and no second dialog has to be stacked on this one.
+    var managing by remember { mutableStateOf(false) }
+    var pendingDelete by remember { mutableStateOf<String?>(null) }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
-        // BoxWithConstraints so the sheet can be as tall as its content but never
-        // taller than the window: a fixed height either wastes half the screen with
-        // five macros or cramps the list with fifty.
         BoxWithConstraints(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-        val listMaxHeight = maxHeight * 0.6f
-        Surface(
-            color = Bg2,
-            shape = RoundedCornerShape(16.dp),
-            border = BorderStroke(1.dp, BorderSubtle),
-            modifier = Modifier
-                .padding(horizontal = 12.dp, vertical = 8.dp)
-                // widthIn before fillMaxWidth: the other order pins the width to the
-                // window and the cap would be silently ignored.
-                .widthIn(max = 560.dp)
-                .fillMaxWidth()
-        ) {
-            Column(
+            val listMaxHeight = maxHeight * 0.62f
+            Surface(
+                color = Bg2,
+                shape = RoundedCornerShape(16.dp),
+                border = BorderStroke(1.dp, BorderSubtle),
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    // widthIn before fillMaxWidth: the other order pins the width to
+                    // the window and the cap would be silently ignored.
+                    .widthIn(max = 560.dp)
+                    .fillMaxWidth()
             ) {
-                // ── Header: one row, no subtitle block ──────────────────────
-                Row(
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(start = 2.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
                 ) {
-                    Text("宏", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
-                    Text("${macros.size} 个", fontSize = 9.sp, color = TextTertiary)
-                    Spacer(Modifier.weight(1f))
-                    Text("点一下切换 · ✎ 编辑", fontSize = 9.sp, color = TextTertiary)
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .clickable { onDismiss() },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
-                    }
-                }
-
-                // ── Record entry: single line, sits above the list ──────────
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(RecordRed.copy(alpha = 0.10f))
-                        .border(1.dp, RecordRed.copy(alpha = 0.45f), RoundedCornerShape(10.dp))
-                        .clickable { onRecord() }
-                        .padding(start = 10.dp, end = 8.dp, top = 7.dp, bottom = 7.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .clip(CircleShape)
-                            .background(RecordRed)
-                    )
-                    Text("录制新宏", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RecordRed)
-                    Text(
-                        "边玩边录，停止自动保存",
-                        fontSize = 9.sp,
-                        color = TextTertiary,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Icon(
-                        Icons.Default.FiberManualRecord,
-                        null,
-                        tint = RecordRed.copy(alpha = 0.8f),
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
-
-                Spacer(Modifier.height(8.dp))
-                HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
-
-                // ── List: takes every pixel the header and footer leave ──────
-                if (macros.isEmpty()) {
-                    Box(
+                    // ── Header: one row, no subtitle block ──────────────────
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(120.dp),
-                        contentAlignment = Alignment.Center
+                            .padding(start = 2.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("还没有宏，从上面录一个吧。", fontSize = 12.sp, color = TextSecondary)
+                        Text("宏", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
+                        Text("${macros.size} 个", fontSize = 9.sp, color = TextTertiary)
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            if (managing) "🗑 删除" else "点一下切换 · ✎ 进编辑器",
+                            fontSize = 9.sp,
+                            color = if (managing) AccentAmber else TextTertiary
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onDismiss() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Close, null, tint = TextSecondary, modifier = Modifier.size(14.dp))
+                        }
                     }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(min = 120.dp, max = listMaxHeight),
-                        contentPadding = PaddingValues(vertical = 6.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        items(macros, key = { it.id }) { m ->
-                            val selected = m.id == selectedId
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(if (selected) accent.copy(alpha = 0.14f) else Bg3)
-                                    .border(
-                                        1.dp,
-                                        if (selected) accent.copy(alpha = 0.6f) else BorderSubtle,
-                                        RoundedCornerShape(10.dp)
-                                    )
-                                    .clickable { onSelect(m.id) }
-                                    .padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                // Name and timing share one line: in landscape the
-                                // scarce resource is height, and two-line rows only
-                                // fit three of them on screen.
-                                Text(
-                                    m.name,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (selected) accent else TextPrimary,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier.weight(1f)
+
+                    HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
+
+                    // ── List: everything between the two rules ─────────────
+                    if (macros.isEmpty()) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text("还没有宏，点下面的「录制」边玩边录一个。", fontSize = 12.sp, color = TextSecondary)
+                        }
+                    } else {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 120.dp, max = listMaxHeight),
+                            contentPadding = PaddingValues(vertical = 6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            items(macros, key = { it.id }) { m ->
+                                MacroRow(
+                                    macro = m,
+                                    selected = m.id == selectedId,
+                                    accent = accent,
+                                    managing = managing,
+                                    confirming = pendingDelete == m.id,
+                                    onSelect = { onSelect(m.id) },
+                                    onEdit = { onEdit(m.id) },
+                                    onAskDelete = { pendingDelete = m.id },
+                                    onCancelDelete = { pendingDelete = null },
+                                    onConfirmDelete = {
+                                        pendingDelete = null
+                                        onDelete(m.id)
+                                    }
                                 )
-                                Text(
-                                    "${m.steps.size} 段 · ${m.durationMs} ms",
-                                    fontSize = 9.sp,
-                                    color = TextTertiary,
-                                    maxLines = 1
-                                )
-                                if (selected) {
-                                    Icon(
-                                        Icons.Default.Check,
-                                        null,
-                                        tint = accent,
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(30.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable { onEdit(m.id) },
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Default.Edit,
-                                        null,
-                                        tint = TextSecondary,
-                                        modifier = Modifier.size(15.dp)
-                                    )
-                                }
                             }
                         }
                     }
-                }
 
-                HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
+                    HorizontalDivider(color = BorderSubtle, thickness = 0.5.dp)
 
-                // ── Footer: two thin chips instead of a button row ──────────
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(
+                    // ── Footer: record / new / manage, one row of three ────
+                    Row(
                         modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Bg3)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
-                            .clickable { onEdit(null) }
-                            .padding(vertical = 7.dp),
-                        contentAlignment = Alignment.Center
+                            .fillMaxWidth()
+                            .padding(top = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("新建宏", fontSize = 11.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
-                    }
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(accent.copy(alpha = 0.14f))
-                            .border(1.dp, accent.copy(alpha = 0.5f), RoundedCornerShape(10.dp))
-                            .clickable(enabled = selectedId != null) { onEdit(selectedId) }
-                            .padding(vertical = 7.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            "编辑当前",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (selectedId != null) accent else TextTertiary
+                        PickerButton(
+                            label = "录制",
+                            color = RecordRed,
+                            container = RecordRed.copy(alpha = 0.12f),
+                            border = RecordRed.copy(alpha = 0.45f),
+                            icon = Icons.Default.FiberManualRecord,
+                            modifier = Modifier.weight(1f),
+                            onClick = onRecord
+                        )
+                        PickerButton(
+                            label = "新建宏",
+                            color = TextSecondary,
+                            container = Bg3,
+                            border = BorderSubtle,
+                            icon = Icons.Default.Add,
+                            modifier = Modifier.weight(1f),
+                            onClick = { onEdit(null) }
+                        )
+                        PickerButton(
+                            label = if (managing) "完成" else "编辑",
+                            color = if (managing) Color.Black else accent,
+                            container = if (managing) accent else accent.copy(alpha = 0.14f),
+                            border = accent.copy(alpha = if (managing) 1f else 0.5f),
+                            icon = if (managing) Icons.Default.Check else Icons.Default.Edit,
+                            modifier = Modifier.weight(1f),
+                            onClick = {
+                                managing = !managing
+                                pendingDelete = null
+                            }
                         )
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * One macro in the picker. Normally a selector with a pencil; in manage mode it
+ * also carries a trash can (a reset arrow for built-ins, whose delete is a "restore
+ * factory steps"). Tapping that swaps the row for an inline yes/no rather than
+ * throwing up another dialog over this one.
+ */
+@Composable
+private fun MacroRow(
+    macro: Macro,
+    selected: Boolean,
+    accent: Color,
+    managing: Boolean,
+    confirming: Boolean,
+    onSelect: () -> Unit,
+    onEdit: () -> Unit,
+    onAskDelete: () -> Unit,
+    onCancelDelete: () -> Unit,
+    onConfirmDelete: () -> Unit
+) {
+    val builtin = MacroLibrary.isBuiltin(macro.id)
+    val danger = if (builtin) AccentAmber else AccentRed
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                when {
+                    confirming -> danger.copy(alpha = 0.12f)
+                    selected -> accent.copy(alpha = 0.14f)
+                    else -> Bg3
+                }
+            )
+            .border(
+                1.dp,
+                when {
+                    confirming -> danger.copy(alpha = 0.55f)
+                    selected -> accent.copy(alpha = 0.6f)
+                    else -> BorderSubtle
+                },
+                RoundedCornerShape(10.dp)
+            )
+            .clickable(enabled = !confirming) { onSelect() }
+            .padding(start = 10.dp, end = 2.dp, top = 4.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (confirming) {
+            Text(
+                if (builtin) "恢复「${macro.name}」的内置步骤？" else "删除「${macro.name}」？",
+                fontSize = 11.sp,
+                color = danger,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            PickerChip(label = "取消", color = TextSecondary, borderColor = BorderSubtle) {
+                onCancelDelete()
+            }
+            PickerChip(
+                label = if (builtin) "恢复" else "删除",
+                color = danger,
+                borderColor = danger.copy(alpha = 0.55f),
+                filled = true,
+                onClick = onConfirmDelete
+            )
+        } else {
+            // Name and timing share one line: in landscape the scarce resource is
+            // height, and two-line rows only fit three of them on screen.
+            Text(
+                macro.name,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = if (selected) accent else TextPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "${macro.steps.size} 段 · ${macro.durationMs} ms",
+                fontSize = 9.sp,
+                color = TextTertiary,
+                maxLines = 1
+            )
+            if (selected) {
+                Icon(Icons.Default.Check, null, tint = accent, modifier = Modifier.size(14.dp))
+            }
+            Box(
+                modifier = Modifier
+                    .size(30.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable { onEdit() },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Default.Edit, null, tint = TextSecondary, modifier = Modifier.size(15.dp))
+            }
+            if (managing) {
+                Box(
+                    modifier = Modifier
+                        .size(30.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { onAskDelete() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        if (builtin) Icons.Default.Refresh else Icons.Default.Delete,
+                        null,
+                        tint = danger,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
         }
+    }
+}
+
+/** One of the three footer chips: record / new / manage. */
+@Composable
+private fun PickerButton(
+    label: String,
+    color: Color,
+    container: Color,
+    border: Color,
+    modifier: Modifier = Modifier,
+    icon: ImageVector? = null,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(10.dp))
+            .background(container)
+            .border(1.dp, border, RoundedCornerShape(10.dp))
+            .clickable { onClick() }
+            .padding(vertical = 7.dp),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (icon != null) {
+            Icon(icon, null, tint = color, modifier = Modifier.size(12.dp))
+            Spacer(Modifier.width(5.dp))
+        }
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = color, maxLines = 1)
+    }
+}
+
+/** The little yes/no buttons inside a row that is asking to delete itself. */
+@Composable
+private fun PickerChip(
+    label: String,
+    color: Color,
+    borderColor: Color,
+    filled: Boolean = false,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(if (filled) color.copy(alpha = 0.16f) else Color.Transparent)
+            .border(1.dp, borderColor, RoundedCornerShape(8.dp))
+            .clickable { onClick() }
+            .padding(horizontal = 9.dp, vertical = 3.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color, maxLines = 1)
     }
 }
 
