@@ -13,6 +13,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBackIosNew
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
@@ -117,23 +118,41 @@ fun MacroEditorScreen(
         applySteps(list, sort)
     }
 
-    val firstStart = steps.minOfOrNull { it.start } ?: 0
-    val lastEnd = steps.maxOfOrNull { it.end } ?: 0
-    // How far the whole script can still slide before a press would fall off either
+    // Bulk move. Normally it means "the whole script", but 「选择」 narrows it to the
+    // ticked rows, which is the "only these three should move" case.
+    var selecting by remember(macro.id) { mutableStateOf(false) }
+    var selection by remember(macro.id) { mutableStateOf<Set<Int>>(emptySet()) }
+
+    val targets: Set<Int>? =
+        if (selecting) selection.takeIf { it.isNotEmpty() } else steps.indices.toSet()
+    val targetSteps = if (targets == null) emptyList() else steps.filterIndexed { i, _ -> i in targets }
+    // How far the target presses can still slide before one would fall off either
     // end. Clamping the delta instead of each press keeps the spacing intact.
-    val shiftRoomBack = -firstStart
-    val shiftRoomForward = MacroStore.MAX_START - lastEnd
+    val shiftRoomBack = if (targets == null) 0 else -(targetSteps.minOfOrNull { it.start } ?: 0)
+    val shiftRoomForward =
+        if (targets == null) 0 else MacroStore.MAX_START - (targetSteps.maxOfOrNull { it.end } ?: 0)
 
     /**
-     * Moves every press by [deltaTicks]. This is the "make it all a bit later" knob:
-     * the internal choreography is untouched, only the script's start on the clock
-     * moves, so a macro that needs a longer lead-in does not have to be rebuilt by
-     * dragging a dozen rows.
+     * Moves the target presses by [deltaTicks]. The internal choreography is
+     * untouched, only where those presses sit on the clock changes, so a macro that
+     * needs a longer lead-in — or three presses that need to come later — does not
+     * have to be rebuilt by dragging a dozen rows. The tick marks ride along through
+     * the re-sort so a second nudge hits the same rows.
      */
-    fun shiftAll(deltaTicks: Int) {
+    fun shift(deltaTicks: Int) {
+        val picked = targets ?: return
         val delta = deltaTicks.coerceAtLeast(shiftRoomBack).coerceAtMost(shiftRoomForward)
         if (delta == 0) return
-        applySteps(steps.map { it.copy(start = it.start + delta) })
+        val marked = steps.mapIndexed { i, step ->
+            (if (i in picked) step.copy(start = step.start + delta) else step) to (i in picked)
+        }
+        val ordered = marked.sortedWith(compareBy({ it.first.start }, { it.first.end }))
+        steps = ordered.map { it.first }
+        if (selecting) selection = ordered.indices.filter { ordered[it].second }.toSet()
+    }
+
+    fun toggleTick(index: Int) {
+        selection = if (index in selection) selection - index else selection + index
     }
 
     val maxEnd = draft.totalTicks
@@ -254,6 +273,7 @@ fun MacroEditorScreen(
                 steps = steps,
                 totalTicks = draft.totalTicks,
                 selected = pickerIndex,
+                marked = if (selecting) selection else emptySet(),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(88.dp)
@@ -275,18 +295,33 @@ fun MacroEditorScreen(
                 Text("${draft.durationMs} ms", fontSize = 9.sp, color = TextTertiary)
             }
 
-            // Whole-script nudge: everything shifts together, spacing preserved.
+            // Bulk nudge: the whole script by default, only the ticked presses while
+            // 「选择」 is on. Spacing inside the moved group is preserved.
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Text("整批", fontSize = 9.sp, color = TextTertiary)
-                ShiftChip("−200", enabled = shiftRoomBack <= -25) { shiftAll(-25) }
-                ShiftChip("−40", enabled = shiftRoomBack <= -5) { shiftAll(-5) }
+                Text(
+                    if (selecting) "已选 ${selection.size}" else "整批",
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (selecting) AccentBlue else TextTertiary,
+                    modifier = Modifier.width(34.dp)
+                )
+                ShiftChip("−200", enabled = shiftRoomBack <= -25) { shift(-25) }
+                ShiftChip("−40", enabled = shiftRoomBack <= -5) { shift(-5) }
                 Spacer(Modifier.weight(1f))
-                ShiftChip("+40", enabled = shiftRoomForward >= 5) { shiftAll(5) }
-                ShiftChip("+200", enabled = shiftRoomForward >= 25) { shiftAll(25) }
+                ShiftChip("+40", enabled = shiftRoomForward >= 5) { shift(5) }
+                ShiftChip("+200", enabled = shiftRoomForward >= 25) { shift(25) }
+                ShiftChip(
+                    label = if (selecting) "完成" else "选择",
+                    enabled = true,
+                    tint = AccentAmber
+                ) {
+                    selecting = !selecting
+                    if (!selecting) selection = emptySet()
+                }
             }
         }
 
@@ -316,7 +351,12 @@ fun MacroEditorScreen(
                     step = step,
                     startRange = startRange,
                     canDelete = steps.size > 1,
-                    onOpenPicker = { pickerIndex = index },
+                    selecting = selecting,
+                    checked = index in selection,
+                    onToggle = { toggleTick(index) },
+                    onOpenPicker = {
+                        if (selecting) toggleTick(index) else pickerIndex = index
+                    },
                     onStart = { value ->
                         updateStep(index, sort = false) { it.copy(start = value.coerceIn(0, MacroStore.MAX_START)) }
                     },
@@ -526,6 +566,7 @@ private fun MacroTimeline(
     steps: List<MacroStep>,
     totalTicks: Int,
     selected: Int,
+    marked: Set<Int> = emptySet(),
     modifier: Modifier = Modifier
 ) {
     val rows = steps.size.coerceAtLeast(1)
@@ -560,7 +601,10 @@ private fun MacroTimeline(
             val color = when {
                 step.isEmpty -> BorderSubtle.copy(alpha = 0.5f)
                 index == selected -> AccentAmber.copy(alpha = 0.9f)
-                else -> AccentCyan.copy(alpha = 0.85f)
+                // Ticked rows stand out, so 「整批」 while selecting is obvious about
+                // which bars it is about to move.
+                index in marked -> AccentBlue.copy(alpha = 0.95f)
+                else -> AccentCyan.copy(alpha = if (marked.isEmpty()) 0.85f else 0.35f)
             }
             if (step.mode == PressMode.TURBO) {
                 var at = step.start
@@ -585,6 +629,9 @@ private fun PressRow(
     step: MacroStep,
     startRange: Int,
     canDelete: Boolean,
+    selecting: Boolean = false,
+    checked: Boolean = false,
+    onToggle: () -> Unit = {},
     onOpenPicker: () -> Unit,
     onStart: (Int) -> Unit,
     onStartDone: () -> Unit,
@@ -621,11 +668,32 @@ private fun PressRow(
                 modifier = Modifier
                     .size(26.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Bg3)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(8.dp)),
+                    .background(if (selecting && checked) AccentBlue.copy(alpha = 0.22f) else Bg3)
+                    .border(
+                        1.dp,
+                        if (selecting && checked) AccentBlue else BorderSubtle,
+                        RoundedCornerShape(8.dp)
+                    )
+                    .clickable(enabled = selecting) { onToggle() },
                 contentAlignment = Alignment.Center
             ) {
-                Text("${index + 1}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = TextSecondary)
+                if (selecting) {
+                    if (checked) {
+                        Icon(
+                            Icons.Default.Check,
+                            null,
+                            tint = AccentBlue,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                } else {
+                    Text(
+                        "${index + 1}",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextSecondary
+                    )
+                }
             }
 
             Column(
@@ -650,7 +718,7 @@ private fun PressRow(
                 )
             }
 
-            Box {
+            if (!selecting) Box {
                 Box(
                     modifier = Modifier
                         .size(28.dp)
@@ -691,6 +759,7 @@ private fun PressRow(
             }
         }
 
+        if (!selecting) {
         TimeBar(
             label = "起点",
             ticks = step.start,
@@ -746,6 +815,7 @@ private fun PressRow(
                 onChangeFinished = {},
                 tint = AccentAmber
             )
+        }
         }
     }
 }
@@ -954,26 +1024,27 @@ private fun RowScope.AddStepButton(label: String, icon: ImageVector, onClick: ()
 
 /** One nudge button of the whole-script shift rail (−200 / −40 / +40 / +200 ms). */
 @Composable
-private fun ShiftChip(label: String, enabled: Boolean, onClick: () -> Unit) {
+private fun ShiftChip(
+    label: String,
+    enabled: Boolean,
+    tint: Color = AccentBlue,
+    onClick: () -> Unit
+) {
+    val color = if (enabled) tint else TextTertiary
     Box(
         modifier = Modifier
             .clip(RoundedCornerShape(8.dp))
-            .background(if (enabled) AccentBlue.copy(alpha = 0.12f) else Bg3)
+            .background(if (enabled) tint.copy(alpha = 0.12f) else Bg3)
             .border(
                 1.dp,
-                if (enabled) AccentBlue.copy(alpha = 0.42f) else BorderSubtle,
+                if (enabled) tint.copy(alpha = 0.42f) else BorderSubtle,
                 RoundedCornerShape(8.dp)
             )
             .clickable(enabled = enabled) { onClick() }
-            .padding(horizontal = 10.dp, vertical = 6.dp),
+            .padding(horizontal = 9.dp, vertical = 6.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            label,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            color = if (enabled) AccentBlue else TextTertiary
-        )
+        Text(label, fontSize = 10.sp, fontWeight = FontWeight.Bold, color = color)
     }
 }
 
