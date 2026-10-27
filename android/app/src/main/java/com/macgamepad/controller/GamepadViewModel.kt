@@ -8,6 +8,10 @@ import android.bluetooth.BluetoothDevice
 import com.macgamepad.controller.bt.BluetoothGamepadService
 import com.macgamepad.controller.bt.GamepadService
 import com.macgamepad.controller.input.InputState
+import com.macgamepad.controller.input.Macro
+import com.macgamepad.controller.input.MacroLibrary
+import com.macgamepad.controller.input.MacroStore
+import com.macgamepad.controller.input.sanitized
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -25,7 +29,10 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
         private const val PREFS_NAME = "macgamepad_prefs"
         private const val KEY_PROFILE = "active_profile"
         private const val KEY_MODE = "active_mode"
-        private val LAYOUT_COMPONENTS = listOf("leftStick", "rightStick", "dpad", "abxy", "shoulderL", "shoulderR", "sysButtons")
+        private const val KEY_MACRO = "macro_selected"
+        // "macro" is a layout element like any other, so the extra button can be
+        // dragged, scaled and reset per profile.
+        private val LAYOUT_COMPONENTS = listOf("leftStick", "rightStick", "dpad", "abxy", "shoulderL", "shoulderR", "sysButtons", "macro")
     }
 
     private val prefs = application.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -42,7 +49,7 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
     // ================================================================
     // Navigation state
     // ================================================================
-    enum class Screen { CONNECTION, DASHBOARD, GAMEPAD, PROFILE, SETTINGS }
+    enum class Screen { CONNECTION, DASHBOARD, GAMEPAD, PROFILE, SETTINGS, MACRO_EDITOR }
 
     private val _currentScreen = MutableStateFlow(Screen.CONNECTION)
     val currentScreen: StateFlow<Screen> = _currentScreen.asStateFlow()
@@ -98,6 +105,37 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
 
     private val _vibrationEnabled = MutableStateFlow(prefs.getBoolean("pref_vibration", true))
     val vibrationEnabled: StateFlow<Boolean> = _vibrationEnabled.asStateFlow()
+
+    // ================================================================
+    // Macros
+    //
+    // The built-ins live in MacroLibrary; whatever the user edits or creates is
+    // layered on top by MacroStore, so the on-screen button can replay a script
+    // of the user's own making without touching the HID descriptor.
+    // ================================================================
+    private val macroStore = MacroStore(prefs)
+
+    private val _macros = MutableStateFlow(macroStore.loadAll())
+    val macros: StateFlow<List<Macro>> = _macros.asStateFlow()
+
+    private val _selectedMacroId = MutableStateFlow(
+        prefs.getString(KEY_MACRO, MacroLibrary.DEFAULT_ID) ?: MacroLibrary.DEFAULT_ID
+    )
+    val selectedMacroId: StateFlow<String> = _selectedMacroId.asStateFlow()
+
+    /** Non-null while the editor is open. */
+    private val _editingMacroId = MutableStateFlow<String?>(null)
+    val editingMacroId: StateFlow<String?> = _editingMacroId.asStateFlow()
+
+    /** Where the editor was opened from, so Back returns there. */
+    private var macroEditorReturn: Screen = Screen.DASHBOARD
+
+    init {
+        // The stored selection may point at a macro that was deleted in a previous run.
+        if (_macros.value.none { it.id == _selectedMacroId.value }) {
+            _macros.value.firstOrNull()?.let { _selectedMacroId.value = it.id }
+        }
+    }
 
     fun setService(service: GamepadService?) {
         _gamepadService.value = service
@@ -410,5 +448,105 @@ class GamepadViewModel(application: Application) : AndroidViewModel(application)
 
     fun onTouchpadClick() {
         _gamepadService.value?.triggerMouseClick()
+    }
+
+    // ================================================================
+    // Macro button
+    //
+    // The macro is replayed entirely on the phone: the host keeps seeing the same
+    // Switch/Xbox/PlayStation buttons, so nothing has to be re-paired or rebound
+    // to gain the extra key.
+    // ================================================================
+
+    fun macroById(id: String?): Macro =
+        _macros.value.firstOrNull { it.id == id } ?: _macros.value.firstOrNull() ?: MacroLibrary.zlACombo
+
+    /** The macro the on-screen button fires. */
+    fun selectedMacro(): Macro = macroById(_selectedMacroId.value)
+
+    fun setSelectedMacro(macroId: String) {
+        val m = _macros.value.firstOrNull { it.id == macroId } ?: return
+        _selectedMacroId.value = m.id
+        prefs.edit().putString(KEY_MACRO, m.id).apply()
+    }
+
+    /** Long-press on the macro button opens the picker; this walks it without the UI. */
+    fun cycleMacro(): Macro {
+        val all = _macros.value
+        if (all.isEmpty()) return MacroLibrary.zlACombo
+        val index = all.indexOfFirst { it.id == _selectedMacroId.value }
+        val next = all[(index + 1).mod(all.size)]
+        setSelectedMacro(next.id)
+        Log.i(TAG, "Macro selection: ${next.id}")
+        return next
+    }
+
+    fun triggerMacro() {
+        val macro = selectedMacro()
+        Log.i(TAG, "Macro button: ${macro.id}")
+        _gamepadService.value?.triggerMacro(macro)
+    }
+
+    fun cancelMacro() {
+        _gamepadService.value?.cancelMacro()
+    }
+
+    /** Fires an unsaved draft straight from the editor, so timing can be felt out. */
+    fun previewMacro(macro: Macro) {
+        _gamepadService.value?.triggerMacro(macro.sanitized())
+    }
+
+    fun saveMacro(macro: Macro) {
+        _macros.value = macroStore.save(macro)
+        Log.i(TAG, "Macro saved: ${macro.id}, ${macro.steps.size} steps")
+    }
+
+    fun deleteMacro(macroId: String) {
+        val wasCustom = !MacroLibrary.isBuiltin(macroId)
+        _macros.value = macroStore.delete(macroId)
+        if (_macros.value.none { it.id == _selectedMacroId.value }) {
+            _macros.value.firstOrNull()?.let { setSelectedMacro(it.id) }
+        }
+        // A deleted custom macro has no editor to return to; a built-in reset keeps its id.
+        if (wasCustom && _editingMacroId.value == macroId) closeMacroEditor()
+    }
+
+    /** Restores a built-in to its factory steps (its override is simply dropped). */
+    fun resetMacro(macroId: String) {
+        _macros.value = macroStore.delete(macroId)
+    }
+
+    fun isMacroOverridden(macroId: String): Boolean = macroStore.isOverridden(macroId)
+
+    fun duplicateMacro(macroId: String) {
+        val src = _macros.value.firstOrNull { it.id == macroId } ?: return
+        val copy = macroStore.newMacro(_macros.value, src)
+        _macros.value = macroStore.save(copy)
+        setSelectedMacro(copy.id)
+    }
+
+    /**
+     * Opens the editor. A null [macroId] creates a new macro and selects it, so the
+     * on-screen button is already pointing at whatever the user is about to build.
+     */
+    fun openMacroEditor(macroId: String?) {
+        // Leaving the pad screen drops whatever was being held; without this a
+        // stick pushed at the moment of the tap would stay pushed on the Mac.
+        _gamepadService.value?.cancelMacro()
+        _gamepadService.value?.updateInputState(InputState())
+        val target = if (macroId == null) {
+            val fresh = macroStore.newMacro(_macros.value)
+            _macros.value = macroStore.save(fresh)
+            setSelectedMacro(fresh.id)
+            fresh.id
+        } else macroId
+        _editingMacroId.value = target
+        macroEditorReturn = if (_currentScreen.value == Screen.MACRO_EDITOR) macroEditorReturn else _currentScreen.value
+        _currentScreen.value = Screen.MACRO_EDITOR
+    }
+
+    fun closeMacroEditor() {
+        _editingMacroId.value = null
+        _currentScreen.value = macroEditorReturn
     }
 }

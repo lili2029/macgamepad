@@ -44,6 +44,9 @@ fun SettingsScreen(
     onAutoReconnectChange: (Boolean) -> Unit,
     mode: GamepadService.Companion.Mode,
     onModeChange: (GamepadService.Companion.Mode) -> Unit,
+    // Macros
+    macroCount: Int,
+    onOpenMacros: () -> Unit,
     // Storage
     estimatedStorageBytes: Int,
     onClearAllLayouts: () -> Unit,
@@ -162,6 +165,32 @@ fun SettingsScreen(
                             )
                         }
                     }
+                }
+            }
+
+            // ── Macros ────────────────────────────────────────────────────
+            SettingsSection(title = "宏") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenMacros() }
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(AccentPurple.copy(alpha = 0.1f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Bolt, null, tint = AccentPurple, modifier = Modifier.size(17.dp))
+                        }
+                        Column {
+                            Text("宏编辑器", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("$macroCount 个宏 · 自定按键序列与时长", fontSize = 10.sp, color = TextSecondary)
+                        }
+                    }
+                    Icon(Icons.Default.ChevronRight, null, tint = TextTertiary, modifier = Modifier.size(15.dp))
                 }
             }
 

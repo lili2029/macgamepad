@@ -22,6 +22,8 @@ Unlike virtual gamepads that rely on Wi-Fi communication and desktop helper daem
   * Runs a highly responsive 125Hz report loop.
   * **Anti-Drift Release Bypass**: Real-time throttling prevents Bluetooth queue saturation, while critical "release" events (returning sticks to zero or releasing buttons) instantly bypass throttling gates.
 * **Keyboard HID Mode**: Directly maps on-screen controls to Ryujinx and Astris default keyboard configurations.
+* **Macro Button**: One extra on-screen key that replays a scripted sequence of the existing buttons (hold ZL and tap A three times, mash A, B into X). The macro runs entirely on the phone — the HID descriptor, report length and button bitmap stay untouched, so the host never needs re-pairing or rebinding. Tap to fire, long-press to open the macro picker.
+* **Macro Editor**: Build your own scripts without touching code. Every step is one HID frame — pick any combination of face buttons, shoulders, triggers, D-pad, stick clicks, system keys and stick directions, then set how many 8 ms ticks it lasts. Steps can be reordered, duplicated or deleted, an empty step is a deliberate gap, and the trailing cooldown releases everything so no button can stick. Built-ins can be edited and restored to factory steps; your own macros can be created, copied and deleted. Everything is persisted as JSON in `SharedPreferences` (`macro_defs_v1`), and the editor can fire the unsaved draft straight at the Mac to check timing. Ships with four templates: ZL+A combo, **YB 复制** (Y and B in one report — the two keys must be sampled on the same frame or the game reads them as separate presses), mash A, and B into X.
 * **Haptics**: Calibrate custom haptic feedback strength or receive vibration commands sent from the Mac host.
 
 ---

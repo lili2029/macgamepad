@@ -17,6 +17,9 @@ import androidx.core.app.NotificationCompat
 import com.macgamepad.controller.MainActivity
 import com.macgamepad.controller.R
 import com.macgamepad.controller.input.InputState
+import com.macgamepad.controller.input.Macro
+import com.macgamepad.controller.input.MacroPlayer
+import com.macgamepad.controller.input.withMacroOverlay
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -70,6 +73,12 @@ class GamepadService : Service(), SensorEventListener {
     @Volatile
     private var lastSentState: InputState? = null
     private var heartbeatCount = 0
+
+    /**
+     * Replays a macro on top of the live input. Owned by the sending coroutine:
+     * [MacroPlayer.advance] is only ever called from the 125 Hz loop.
+     */
+    private val macroPlayer = MacroPlayer()
 
     inner class LocalBinder : Binder() {
         fun getService(): GamepadService = this@GamepadService
@@ -191,8 +200,48 @@ class GamepadService : Service(), SensorEventListener {
                 gyroAccumY = 0f
                 finalState = state.copy(rightStickX = rsX, rightStickY = rsY)
             }
-            btService.sendReport(finalState)
+            // A macro in flight is merged here too: otherwise the first touch the
+            // player makes would drop the macro's held buttons for a frame.
+            sendMergedReport(finalState)
         }
+    }
+
+    /**
+     * Start replaying [macro]. Ignored unless a gamepad session is actually live,
+     * so a stray tap on the macro button can't queue something for later.
+     */
+    fun triggerMacro(macro: Macro) {
+        if (_mode.value != Mode.GAMEPAD) {
+            Log.i(TAG, "Macro ignored: keyboard mode")
+            return
+        }
+        if (btService.connectionState.value != BluetoothGamepadService.ConnectionState.CONNECTED) {
+            Log.i(TAG, "Macro ignored: not connected")
+            return
+        }
+        macroPlayer.start(macro)
+        Log.i(TAG, "Macro started: ${macro.id}, ${macro.totalTicks} ticks (${macro.durationMs} ms)")
+        // Send the first frame now instead of waiting up to 8 ms for the loop.
+        sendMergedReport(currentInputState)
+    }
+
+    fun cancelMacro() {
+        if (macroPlayer.isRunning) {
+            Log.i(TAG, "Macro cancelled: ${macroPlayer.runningId}")
+            macroPlayer.cancel()
+        }
+    }
+
+    /**
+     * The single place a gamepad report leaves the phone. Applies the macro overlay
+     * if one is running, so the live input path and the 125 Hz loop can never
+     * disagree about what the host is being told.
+     */
+    private fun sendMergedReport(userState: InputState) {
+        val overlay = macroPlayer.currentFrame()
+        val state = if (overlay != null) userState.withMacroOverlay(overlay) else userState
+        lastSentState = state
+        btService.sendReport(state)
     }
 
     private var lastSentKeys: List<Byte> = emptyList()
@@ -270,7 +319,20 @@ class GamepadService : Service(), SensorEventListener {
                         Mode.GAMEPAD -> {
                             // Active inputs are sent instantly in updateInputState() for zero latency.
                             // We only send a heartbeat report here every 25 iterations (~200ms) to maintain the Bluetooth link.
-                            if (heartbeatCount >= 25) {
+                            if (macroPlayer.isRunning) {
+                                // A macro needs one report per 8 ms tick: the heartbeat alone
+                                // would smear its steps into 200 ms.
+                                sendMergedReport(currentInputState)
+                                macroPlayer.advance()
+                                if (!macroPlayer.isRunning) {
+                                    // The macro ended; its cooldown already sent a blank frame,
+                                    // but one more plain report guarantees nothing is left held
+                                    // even if a Bluetooth report was dropped.
+                                    btService.sendReport(currentInputState)
+                                    lastSentState = currentInputState
+                                    heartbeatCount = 0
+                                }
+                            } else if (heartbeatCount >= 25) {
                                 btService.sendReport(state)
                                 heartbeatCount = 0
                             } else {
@@ -320,6 +382,8 @@ class GamepadService : Service(), SensorEventListener {
     private fun stopTransmissionLoop() {
         serviceJob?.cancel()
         serviceJob = null
+        // Never leave a macro half-played: the next session starts from a clean slate.
+        macroPlayer.cancel()
         unregisterGyroListener()
     }
 

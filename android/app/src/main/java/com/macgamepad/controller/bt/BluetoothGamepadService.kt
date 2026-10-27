@@ -65,6 +65,7 @@ class BluetoothGamepadService(private val context: Context) {
 
     private val reportPacker = HidReportPacker()
     private val executor = Executors.newSingleThreadExecutor()
+    private var lastSendErrorLogMs = 0L
 
     // ================================================================
     // HID Device callback
@@ -228,12 +229,20 @@ class BluetoothGamepadService(private val context: Context) {
     fun sendRawReport(reportId: Int, reportData: ByteArray): Boolean {
         val device = hostDevice ?: return false
         val hid = hidDevice ?: return false
-        return hid.sendReport(device, reportId, reportData)
+        return try {
+            hid.sendReport(device, reportId, reportData)
+        } catch (e: Exception) {
+            Log.w(TAG, "sendRawReport failed", e)
+            false
+        }
     }
 
     /**
      * Send the current input state as an HID report to the connected host (Gamepad mode).
      * This should be called at 125Hz (every 8ms) from a high-priority thread.
+     *
+     * Called from both the UI thread and the heartbeat coroutine. Any Bluetooth error is
+     * swallowed here (returning false) so a dropped link can't crash the whole app.
      *
      * @param state The current controller input state
      * @return true if the report was sent successfully
@@ -243,9 +252,19 @@ class BluetoothGamepadService(private val context: Context) {
         val device = hostDevice ?: return false
         val hid = hidDevice ?: return false
 
-        val reportData = reportPacker.pack(state)
-        // GamepadHidDescriptor 的 Report ID 是 1（纯手柄描述符里只有这一个 collection）。
-        return hid.sendReport(device, GamepadHidDescriptor.REPORT_ID.toInt(), reportData)
+        return try {
+            val reportData = reportPacker.pack(state)
+            // GamepadHidDescriptor 的 Report ID 是 1（纯手柄描述符里只有这一个 collection）。
+            hid.sendReport(device, GamepadHidDescriptor.REPORT_ID.toInt(), reportData)
+        } catch (e: Exception) {
+            // Rate-limit the log: this path can be hit 125 times a second.
+            val now = android.os.SystemClock.elapsedRealtime()
+            if (now - lastSendErrorLogMs > 5000) {
+                lastSendErrorLogMs = now
+                Log.w(TAG, "sendReport failed", e)
+            }
+            false
+        }
     }
 
     /**

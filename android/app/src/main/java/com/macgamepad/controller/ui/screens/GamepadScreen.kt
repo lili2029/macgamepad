@@ -5,10 +5,13 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -27,12 +30,15 @@ import androidx.compose.ui.input.pointer.changedToDown
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.macgamepad.controller.input.InputState
+import com.macgamepad.controller.input.Macro
 import com.macgamepad.controller.ui.components.*
 import com.macgamepad.controller.ui.theme.*
+import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
@@ -158,8 +164,16 @@ fun GamepadScreen(
     modifier: Modifier = Modifier,
     onInputChanged: (InputState) -> Unit = {},
     onMouseMoved: (Float, Float) -> Unit = { _, _ -> },
-    onTouchpadClick: () -> Unit = {}
+    onTouchpadClick: () -> Unit = {},
+    onMacroTriggered: () -> Unit = {},
+    onMacroLongPress: () -> Unit = {},
+    macroName: String = "宏",
+    macros: List<Macro> = emptyList(),
+    selectedMacroId: String? = null,
+    onMacroSelected: (String) -> Unit = {},
+    onEditMacro: (String?) -> Unit = {}
 ) {
+    var showMacroPicker by remember { mutableStateOf(false) }
     var inputState by remember { mutableStateOf(InputState()) }
     fun updateInput(transform: InputState.() -> InputState) {
         inputState = inputState.transform()
@@ -669,6 +683,107 @@ fun GamepadScreen(
             }
         } // end inner layout branch
 
+        // ═══════════════════════════════════════════════════════════════
+        // MACRO BUTTON
+        // One tap replays a scripted sequence of the buttons above. Nothing
+        // new is added to the HID descriptor: the host still sees the same
+        // Switch/Xbox/PlayStation pad, so no re-pairing or rebinding.
+        // ═══════════════════════════════════════════════════════════════
+        DraggableLayoutElement(
+            id = "macro",
+            isEditMode = isEditMode,
+            externalOffset = offset("macro"),
+            externalScale  = scale("macro"),
+            onOffsetChanged = onOffsetChanged,
+            onScaleChanged  = onScaleChanged,
+            label = "宏按键",
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = if (isEditMode) 92.dp else 26.dp)
+        ) {
+            var firing by remember { mutableStateOf(false) }
+            LaunchedEffect(firing) {
+                if (firing) {
+                    delay(180)
+                    firing = false
+                }
+            }
+            Box(
+                modifier = Modifier
+                    .size(108.dp, 38.dp)
+                    .clip(RoundedCornerShape(19.dp))
+                    .background(
+                        if (firing) {
+                            Brush.linearGradient(listOf(skin.accent, skin.accent.copy(alpha = 0.55f)))
+                        } else {
+                            Brush.linearGradient(listOf(Color(0xFF16203A), Color(0xFF0A0F1E)))
+                        }
+                    )
+                    .border(
+                        1.dp,
+                        skin.accent.copy(alpha = if (firing) 0.95f else 0.35f),
+                        RoundedCornerShape(19.dp)
+                    )
+                    .pointerInput(isEditMode) {
+                        if (!isEditMode) {
+                            detectTapGestures(
+                                onTap = {
+                                    firing = true
+                                    onMacroTriggered()
+                                },
+                                // Long press opens the macro picker / editor instead of
+                                // silently cycling, so a mis-timed hold can't change what
+                                // the next tap fires.
+                                onLongPress = {
+                                    showMacroPicker = true
+                                    onMacroLongPress()
+                                }
+                            )
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = if (firing) Color.Black else skin.accent,
+                        modifier = Modifier.size(13.dp)
+                    )
+                    Text(
+                        text = macroName,
+                        color = if (firing) Color.Black else skin.accent,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        softWrap = false,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 76.dp)
+                    )
+                }
+            }
+        }
+
+        if (showMacroPicker) {
+            MacroPickerDialog(
+                macros = macros,
+                selectedId = selectedMacroId,
+                accent = skin.accent,
+                onSelect = { id ->
+                    showMacroPicker = false
+                    onMacroSelected(id)
+                },
+                onEdit = { id ->
+                    showMacroPicker = false
+                    onEditMacro(id)
+                },
+                onDismiss = { showMacroPicker = false }
+            )
+        }
+
         if (isEditMode) {
             // ── Floating Edit Mode Banner at the Bottom Center ───────────
             Box(
@@ -743,3 +858,114 @@ fun GamepadScreen(
     } // end outer root Box
 } // end GamepadScreen
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Macro picker
+//
+// Long-pressing the macro button opens this instead of silently cycling: the
+// player gets to see what each script does (step count and length) and can jump
+// straight into the editor. The HID side is unaffected either way.
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun MacroPickerDialog(
+    macros: List<Macro>,
+    selectedId: String?,
+    accent: Color,
+    onSelect: (String) -> Unit,
+    onEdit: (String?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = Bg2,
+        tonalElevation = 0.dp,
+        title = {
+            Column {
+                Text("宏", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 15.sp)
+                Text(
+                    "点一下切换，右侧铅笔进入编辑",
+                    fontSize = 10.sp,
+                    color = TextTertiary,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        },
+        text = {
+            if (macros.isEmpty()) {
+                Text("还没有宏，新建一个吧。", fontSize = 12.sp, color = TextSecondary)
+            } else {
+                Column(
+                    modifier = Modifier
+                        .heightIn(max = 260.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    macros.forEach { m ->
+                        val selected = m.id == selectedId
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (selected) accent.copy(alpha = 0.14f) else Bg3)
+                                .border(
+                                    1.dp,
+                                    if (selected) accent.copy(alpha = 0.6f) else BorderSubtle,
+                                    RoundedCornerShape(10.dp)
+                                )
+                                .clickable { onSelect(m.id) }
+                                .padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    m.name,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (selected) accent else TextPrimary,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    "${m.steps.size} 步 · ${m.durationMs} ms",
+                                    fontSize = 9.sp,
+                                    color = TextTertiary
+                                )
+                            }
+                            if (selected) {
+                                Icon(
+                                    Icons.Default.Check,
+                                    null,
+                                    tint = accent,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(30.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable { onEdit(m.id) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Edit,
+                                    null,
+                                    tint = TextSecondary,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onEdit(selectedId) }) {
+                Text("编辑当前", color = accent, fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { onEdit(null) }) {
+                Text("新建宏", color = TextSecondary)
+            }
+        }
+    )
+}

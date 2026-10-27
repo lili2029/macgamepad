@@ -28,9 +28,11 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.macgamepad.controller.bt.BluetoothGamepadService
 import com.macgamepad.controller.bt.GamepadService
+import com.macgamepad.controller.input.MacroLibrary
 import com.macgamepad.controller.ui.screens.ConnectionScreen
 import com.macgamepad.controller.ui.screens.DashboardScreen
 import com.macgamepad.controller.ui.screens.GamepadScreen
+import com.macgamepad.controller.ui.screens.MacroEditorScreen
 import com.macgamepad.controller.ui.screens.ProfileScreen
 import com.macgamepad.controller.ui.screens.SettingsScreen
 import com.macgamepad.controller.ui.theme.MacGamepadTheme
@@ -215,6 +217,8 @@ class MainActivity : ComponentActivity() {
                             val isEditMode by vm.isLayoutEditMode.collectAsState()
                             val offsets by vm.componentOffsets.collectAsState()
                             val scales by vm.componentScales.collectAsState()
+                            val macroId by vm.selectedMacroId.collectAsState()
+                            val macroList by vm.macros.collectAsState()
 
                             GamepadScreen(
                                 profileId = activeProfileId,
@@ -234,8 +238,35 @@ class MainActivity : ComponentActivity() {
                                 modifier = Modifier.fillMaxSize(),
                                 onInputChanged = { vm.onInputChanged(it) },
                                 onMouseMoved = { dx, dy -> vm.onMouseMoved(dx, dy) },
-                                onTouchpadClick = { vm.onTouchpadClick() }
+                                onTouchpadClick = { vm.onTouchpadClick() },
+                                onMacroTriggered = { vm.triggerMacro() },
+                                macroName = macroList.firstOrNull { it.id == macroId }?.name ?: "宏",
+                                macros = macroList,
+                                selectedMacroId = macroId,
+                                onMacroSelected = { vm.setSelectedMacro(it) },
+                                onEditMacro = { vm.openMacroEditor(it) }
                             )
+                        }
+
+                        GamepadViewModel.Screen.MACRO_EDITOR -> {
+                            val macroList by vm.macros.collectAsState()
+                            val editingId by vm.editingMacroId.collectAsState()
+                            val current = macroList.firstOrNull { it.id == editingId } ?: macroList.firstOrNull()
+                            if (current != null) {
+                                MacroEditorScreen(
+                                    macro = current,
+                                    isBuiltin = MacroLibrary.isBuiltin(current.id),
+                                    canPreview = connectionState ==
+                                        BluetoothGamepadService.ConnectionState.CONNECTED &&
+                                        mode == GamepadService.Companion.Mode.GAMEPAD,
+                                    onSave = { vm.saveMacro(it) },
+                                    onPreview = { vm.previewMacro(it) },
+                                    onReset = { vm.resetMacro(current.id) },
+                                    onDelete = { vm.deleteMacro(current.id) },
+                                    onBack = { vm.closeMacroEditor() },
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
                         }
 
                         GamepadViewModel.Screen.PROFILE -> {
@@ -257,6 +288,8 @@ class MainActivity : ComponentActivity() {
                             val hapticStrength by vm.hapticStrength.collectAsState()
                             val vibrationEnabled by vm.vibrationEnabled.collectAsState()
                             val autoReconnect by vm.autoReconnect.collectAsState()
+                            val macroList by vm.macros.collectAsState()
+                            val selectedMacroId by vm.selectedMacroId.collectAsState()
                             val storageBytes = remember(sensitivity, deadZone) { vm.estimateStorageBytes() }
                             SettingsScreen(
                                 sensitivity = sensitivity,
@@ -273,6 +306,8 @@ class MainActivity : ComponentActivity() {
                                 onAutoReconnectChange = { vm.setAutoReconnect(it) },
                                 mode = mode,
                                 onModeChange = { vm.setMode(it) },
+                                macroCount = macroList.size,
+                                onOpenMacros = { vm.openMacroEditor(selectedMacroId) },
                                 estimatedStorageBytes = storageBytes,
                                 onClearAllLayouts = { vm.clearAllLayouts() },
                                 onBack = { vm.navigateToDashboard() },

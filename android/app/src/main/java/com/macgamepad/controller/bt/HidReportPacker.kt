@@ -1,8 +1,6 @@
 package com.macgamepad.controller.bt
 
 import com.macgamepad.controller.input.InputState
-import java.nio.ByteBuffer
-import java.nio.ByteOrder
 
 /**
  * Packs an [InputState] into a 13-byte HID input report matching our descriptor.
@@ -17,46 +15,47 @@ import java.nio.ByteOrder
  *   Byte 11:    Left Trigger   (uint8)
  *   Byte 12:    Right Trigger  (uint8)
  *
- * This class is designed for zero-allocation hot-path usage:
- * it reuses a single ByteBuffer across calls.
+ * Stateless by design: every call writes into a fresh array at fixed offsets.
+ *
+ * This matters — [pack] is called from the UI thread (on every input change) *and*
+ * from the 125 Hz heartbeat coroutine at the same time. An earlier version reused a
+ * single shared ByteBuffer, so two interleaved `clear()` + writes pushed the buffer
+ * position past its capacity and threw ByteBufferOverflowException after a few
+ * minutes of play. Keeping this class free of mutable state makes that impossible.
  */
 class HidReportPacker {
 
-    // Pre-allocated buffer — reused every frame to avoid GC pressure
-    private val buffer = ByteBuffer.allocate(13)
-        .order(ByteOrder.LITTLE_ENDIAN)
-
-    /**
-     * Pack the current input state into a byte array suitable for
-     * [android.bluetooth.BluetoothHidDevice.sendReport].
-     *
-     * @param state The current controller input state
-     * @return A 13-byte array containing the packed HID report
-     */
     fun pack(state: InputState): ByteArray {
-        buffer.clear()
+        val out = ByteArray(REPORT_SIZE)
 
         // Sticks: convert -1.0..1.0 float to -32767..32767 int16
-        buffer.putShort(floatToAxis16(state.leftStickX))
-        buffer.putShort(floatToAxis16(state.leftStickY))
-        buffer.putShort(floatToAxis16(state.rightStickX))
-        buffer.putShort(floatToAxis16(state.rightStickY))
+        putShortLE(out, 0, floatToAxis16(state.leftStickX))
+        putShortLE(out, 2, floatToAxis16(state.leftStickY))
+        putShortLE(out, 4, floatToAxis16(state.rightStickX))
+        putShortLE(out, 6, floatToAxis16(state.rightStickY))
 
         // Hat switch (low nibble) + padding (high nibble)
-        val hat = state.hatDirection() and 0x0F
-        buffer.put(hat.toByte())
+        out[8] = (state.hatDirection() and 0x0F).toByte()
 
         // Buttons: 16-bit bitmask, little-endian
-        buffer.putShort(state.buttonBitmask().toShort())
+        putShortLE(out, 9, state.buttonBitmask().toShort())
 
         // Triggers: convert 0.0..1.0 float to 0..255 uint8
-        buffer.put(floatToTrigger8(state.leftTrigger))
-        buffer.put(floatToTrigger8(state.rightTrigger))
+        out[11] = floatToTrigger8(state.leftTrigger)
+        out[12] = floatToTrigger8(state.rightTrigger)
 
-        return buffer.array().copyOf()
+        return out
+    }
+
+    private fun putShortLE(dst: ByteArray, offset: Int, value: Short) {
+        val v = value.toInt()
+        dst[offset] = (v and 0xFF).toByte()
+        dst[offset + 1] = ((v shr 8) and 0xFF).toByte()
     }
 
     companion object {
+        const val REPORT_SIZE = 13
+
         /**
          * Convert a normalized float (-1.0 to 1.0) to a 16-bit signed axis value.
          * Clamps to [-32767, 32767] — we avoid -32768 because some HID parsers
