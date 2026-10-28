@@ -100,8 +100,8 @@ fun buttonBitmask(): Int {
 
 ### 1. 编译与安装
 ```bash
-git clone https://github.com/Raheedpasha10/Controller.git
-cd Controller/android
+git clone https://github.com/lili2029/macgamepad.git
+cd macgamepad/android
 ./gradlew assembleDebug
 ```
 
@@ -131,6 +131,11 @@ cd Controller/android
 
 ### 面键 A/B 反了
 Ryujinx 等 Switch 模拟器期望的是 Switch 手柄的物理按键布局。请确认使用的是 **Nintendo Switch Pro** 档案。A/B 与 X/Y 的布局换算会把索引输出路由到模拟器的默认布局。
+
+---
+
+## 相关文档
+* [MacGamepad TOTK 定制说明](docs/MacGamepad-TOTK定制说明.md)——把小米 15 变成《王国之泪》无线手柄的完整改造记录：启动闪退、被识别成键盘、右摇杆走 Z/Rz 而非 Rx/Ry、按键位序从 Xbox 改 Switch，这四层坑的成因与修法都写在这里。
 
 ---
 

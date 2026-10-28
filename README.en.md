@@ -92,8 +92,8 @@ To guarantee zero-input drift without choking the Bluetooth queue:
 
 ### 1. Build and Install
 ```bash
-git clone https://github.com/Raheedpasha10/Controller.git
-cd Controller/android
+git clone https://github.com/lili2029/macgamepad.git
+cd macgamepad/android
 ./gradlew assembleDebug
 ```
 Install the generated `app-debug.apk` directly on an Android 9+ device.
@@ -122,6 +122,11 @@ Go to **Settings** in the app. Use the **Stick Sensitivity** slider to adjust am
 
 ### Face buttons swapped (A/B)
 Ryujinx and other Switch emulators expect the physical button layouts of a Switch controller. Ensure you are using the **Nintendo Switch Pro** profile. The A/B and X/Y layout mapping translation will route index outputs to default emulator layouts.
+
+---
+
+## Related Documents
+* [MacGamepad TOTK customization notes](docs/MacGamepad-TOTK定制说明.md) *(Chinese)* — a full write-up of turning a Xiaomi 15 into a wireless controller for *Tears of the Kingdom*: the crash on launch, being enumerated as a keyboard, the right stick living on Z/Rz instead of Rx/Ry, and the button order moving from Xbox to Switch.
 
 ---
 
