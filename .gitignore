@@ -9,3 +9,5 @@ android/app/build/
 *.apk
 *.aar
 tools/gamepad_tester
+tools/gamepad_bridge
+tools/print_reports

@@ -13,6 +13,19 @@ Unlike virtual gamepads that rely on Wi-Fi communication and desktop helper daem
 
 ---
 
+## Differences from Upstream
+
+This repository is a customized branch of [Raheedpasha10/Controller](https://github.com/Raheedpasha10/Controller), aimed at getting the phone recognized as a **pure gamepad** by macOS games. It was verified against the macOS port of *The Legend of Zelda: Tears of the Kingdom* (Xiaomi 15 → MacBook Air M4). Four things differ from upstream:
+
+1. **Foreground-service start order** — Android 14+ enforces foreground-service type permissions, and upstream calls `startForeground` *before* requesting them, so the app crashes on launch.
+2. **Pure gamepad HID descriptor** — upstream ships a composite keyboard + mouse + gamepad descriptor, so `PrimaryUsage` is taken by the first collection (keyboard) and macOS enumerates the phone as a keyboard. A composite descriptor also makes macOS require Input Monitoring, which plain games lack — they then silently fail to open the device.
+3. **Right stick moved off Z/Rz** — upstream puts the right stick on `Rx/Ry`, but the ported runtime reads `hidPad.rx = hidZ` / `hidPad.ry = hidRz` in `gamepad.m`, i.e. it treats Z/Rz as the right stick. Analog triggers move to `Rx/Ry` accordingly (the game ignores them; ZL/ZR go through button bits).
+4. **Switch button order** — upstream uses Xbox bit order, while the game reads Switch usage numbers (1=B, 2=A, 4=Y, 5=X). Without this, A/B and X/Y come out swapped.
+
+The full investigation — reports, descriptors and how they map to the tested hardware — is in [docs/MacGamepad-TOTK定制说明.md](docs/MacGamepad-TOTK定制说明.md) *(Chinese)*.
+
+---
+
 ## Core Features
 
 * **Hardware-Level Emulation**: Registers directly with macOS as a standard Bluetooth controller. Supports three console profiles:

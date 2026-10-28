@@ -13,6 +13,19 @@
 
 ---
 
+## 本仓库与上游的差异
+
+本仓库是 [Raheedpasha10/Controller](https://github.com/Raheedpasha10/Controller) 的定制分支，目标是让它作为**纯手柄**被 macOS 游戏正确识别（实测对象为《塞尔达传说：王国之泪》的 Mac 移植版，小米 15 → MacBook Air M4）。相对上游改了四处：
+
+1. **前台服务启动时序**——Android 14+ 强制校验前台服务类型权限，上游在申请权限**之前**就调用 `startForeground`，导致 App 一启动即闪退。
+2. **换成纯手柄 HID 描述符**——上游用的是「键盘 + 鼠标 + 手柄」复合描述符，`PrimaryUsage` 被第一个 collection（键盘）占走，macOS 因此把手机认成键盘；而且复合描述符会让 macOS 要求「输入监控」权限，普通游戏没有该权限就会静默打不开设备。
+3. **右摇杆让出 Z/Rz**——上游把右摇杆放在 `Rx/Ry`，而移植版 runtime 的 `gamepad.m` 里 `hidPad.rx = hidZ`、`hidPad.ry = hidRz`，即它把 Z/Rz 当右摇杆读；模拟扳机相应挪到 `Rx/Ry`（游戏不读这两个，ZL/ZR 改走按钮位）。
+4. **按键位序改为 Switch**——上游用 Xbox 位序，游戏按 Switch 的 usage 号取位（1=B、2=A、4=Y、5=X）；不改的话 A/B、X/Y 全错位。
+
+完整的排查过程（报文、描述符与实测机型之间的对应关系）见 [docs/MacGamepad-TOTK定制说明.md](docs/MacGamepad-TOTK定制说明.md)。
+
+---
+
 ## 核心特性
 
 * **硬件级模拟**：直接以标准蓝牙手柄的身份在 macOS 注册。支持三种主机档案：
