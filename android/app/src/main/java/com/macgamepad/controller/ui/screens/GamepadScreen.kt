@@ -254,12 +254,16 @@ fun GamepadScreen(
                 }
             }
     ) {
-        // Inner safe-drawing box so content never hides behind navigation bars.
-        // Background intentionally fills to edges; only interactive elements get inset.
+        // Inner safe box so content never hides behind the camera hole or the
+        // navigation bar. This screen hides the system bars, which zeroes the
+        // systemBars insets — so the fixed padding below is what actually keeps the
+        // shoulders off the rounded corners and the sticks clear of the gesture bar.
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .windowInsetsPadding(WindowInsets.displayCutout)
                 .navigationBarsPadding()
+                .padding(horizontal = 8.dp, vertical = 10.dp)
         ) {
 
         // ═══════════════════════════════════════════════════════════════

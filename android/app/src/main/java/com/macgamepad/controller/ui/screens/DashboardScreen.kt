@@ -256,7 +256,7 @@ fun DashboardScreen(
             .background(Brush.verticalGradient(listOf(Bg0, Bg1, Bg1)))
             .statusBarsPadding()
             .navigationBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
 
@@ -277,10 +277,11 @@ fun DashboardScreen(
             Row(
                 modifier = Modifier.weight(1f, fill = false),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Canvas logo mark
-                Canvas(modifier = Modifier.size(34.dp)) {
+                // Canvas logo mark — deliberately small: on a 360dp-wide phone every
+                // dp here comes out of the brand name, which was being ellipsised.
+                Canvas(modifier = Modifier.size(22.dp)) {
                     val cx = size.width / 2f; val cy = size.height / 2f
                     drawCircle(color = Bg3, radius = cx * 0.85f, center = Offset(cx, cy))
                     drawCircle(color = AccentBlue.copy(alpha = 0.5f), radius = cx * 0.85f, center = Offset(cx, cy), style = Stroke(1.5f))
@@ -292,11 +293,12 @@ fun DashboardScreen(
                 Column {
                     Text(
                         "MacGamepad",
-                        fontSize = 15.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = (-0.3).sp,
+                        letterSpacing = (-0.4).sp,
                         color = TextPrimary,
                         maxLines = 1,
+                        softWrap = false,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text("蓝牙手柄", fontSize = 9.sp, color = TextTertiary, letterSpacing = 0.3.sp, maxLines = 1)
@@ -336,7 +338,7 @@ fun DashboardScreen(
                 // Connection status pill
                 Row(
                     modifier = Modifier
-                        .widthIn(max = 118.dp)
+                        .widthIn(max = 96.dp)
                         .clip(RoundedCornerShape(20.dp))
                         .background(if (isConnected) StatusConnected.copy(alpha = 0.08f) else Bg3)
                         .border(
@@ -351,7 +353,9 @@ fun DashboardScreen(
                 ) {
                     Box(modifier = Modifier.size(6.dp).clip(CircleShape).background(if (isConnected) StatusConnected else StatusConnecting))
                     Text(
-                        text = if (isConnected) (connectedDeviceName ?: "已连接") else "未连接",
+                        // The full host name ("hqj的MacBook Air") never fits in a
+                        // 360dp header, and "hqj的M…" reads worse than plain state.
+                        text = if (isConnected) "已连接" else "未连接",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = if (isConnected) StatusConnected else TextSecondary,
