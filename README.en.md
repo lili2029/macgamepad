@@ -111,6 +111,8 @@ cd macgamepad/android
 ```
 Install the generated `app-debug.apk` directly on an Android 9+ device.
 
+Requires **JDK 17** and **Android SDK 35** (compileSdk 35 / minSdk 28). Environment setup, build-error reference and the macOS-side diagnostic tools are covered in [Build & Debugging](docs/BUILD.md) *(Chinese)*.
+
 ### 2. Pairing
 1. Open the app and select your emulated profile.
 2. Tap **Initialize**.
@@ -139,6 +141,7 @@ Ryujinx and other Switch emulators expect the physical button layouts of a Switc
 ---
 
 ## Related Documents
+* [Build & Debugging](docs/BUILD.md) *(Chinese)* — JDK/SDK requirements, build commands, and how to use the four macOS diagnostic tools in `tools/`: reading `print_reports` output, and a symptom-to-root-cause table.
 * [MacGamepad TOTK customization notes](docs/MacGamepad-TOTK定制说明.md) *(Chinese)* — a full write-up of turning a Xiaomi 15 into a wireless controller for *Tears of the Kingdom*: the crash on launch, being enumerated as a keyboard, the right stick living on Z/Rz instead of Rx/Ry, and the button order moving from Xbox to Switch.
 
 ---

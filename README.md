@@ -120,6 +120,8 @@ cd macgamepad/android
 
 把生成的 `app-debug.apk` 直接安装到 Android 9 及以上设备。
 
+需要 **JDK 17** 与 **Android SDK 35**（compileSdk 35 / minSdk 28）；环境准备、编译报错对照与 macOS 侧调试工具见 [构建与调试](docs/BUILD.md)。
+
 ### 2. 配对
 1. 打开 App，选择要模拟的手柄档案。
 2. 点 **Initialize**。
@@ -148,6 +150,7 @@ Ryujinx 等 Switch 模拟器期望的是 Switch 手柄的物理按键布局。�
 ---
 
 ## 相关文档
+* [构建与调试](docs/BUILD.md)——JDK/SDK 版本要求、编译命令，以及 `tools/` 下四个 macOS 诊断工具的用法、`print_reports` 报文怎么读、常见现象到根因的速查表。
 * [MacGamepad TOTK 定制说明](docs/MacGamepad-TOTK定制说明.md)——把小米 15 变成《王国之泪》无线手柄的完整改造记录：启动闪退、被识别成键盘、右摇杆走 Z/Rz 而非 Rx/Ry、按键位序从 Xbox 改 Switch，这四层坑的成因与修法都写在这里。
 
 ---
