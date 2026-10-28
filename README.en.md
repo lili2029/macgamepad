@@ -1,5 +1,7 @@
 # MacGamepad
 
+[简体中文](README.md) | **English**
+
 Turn any Android device into a low-latency, hardware-level Bluetooth HID controller for macOS. No host-side configuration or client software required.
 
 [![Kotlin](https://img.shields.io/badge/Kotlin-1.9.0-blue.svg?style=flat-square&logo=kotlin)](https://kotlinlang.org)
@@ -67,11 +69,11 @@ MacGamepad defines a custom HID report descriptor matching console specification
 // Packets are formatted into a standard 16-bit bitmask in InputModel.kt
 fun buttonBitmask(): Int {
     var mask = 0
-    if (buttonA) mask = mask or (1 shl 0)
-    if (buttonB) mask = mask or (1 shl 1)
-    if (buttonX) mask = mask or (1 shl 2)
-    if (buttonY) mask = mask or (1 shl 3)
-    // ... maps to standard OS controller bits
+    if (buttonB) mask = mask or (1 shl 0)   // usage 1  B (down)
+    if (buttonA) mask = mask or (1 shl 1)   // usage 2  A (right)
+    if (buttonY) mask = mask or (1 shl 3)   // usage 4  Y (left)
+    if (buttonX) mask = mask or (1 shl 4)   // usage 5  X (up)
+    // ... laid out in Switch usage order, not Xbox A/B/X/Y
     return mask
 }
 ```
